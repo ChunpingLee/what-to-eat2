@@ -39,6 +39,8 @@ function validBudget(budget) {
     return min === undefined || max === undefined || min <= max;
 }
 function validate(request) {
+    if (!request || typeof request !== 'object')
+        throw new RecommendationRequestError();
     const hasPreference = Boolean(text(request.category) || text(request.keywords) || request.random);
     if (!hasPreference || !validPoint(request.center)
         || !finite(request.radiusMeters) || request.radiusMeters <= 0 || request.radiusMeters > 50_000
@@ -140,6 +142,7 @@ function createLazyRouteTimesClient(createClient) {
     };
 }
 function main(event, _context, sdk = require('@cloudbase/node-sdk')) {
+    validate(event);
     const app = sdk.init({ env: sdk.SYMBOL_CURRENT_ENV });
     const database = app.database();
     const searchService = (0, cache_1.createPlaceSearchService)({

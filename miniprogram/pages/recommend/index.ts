@@ -1,7 +1,7 @@
 import type { RecommendationRequest } from '../../../src/domain/recommendation'
-import type { GeoPoint, TravelMode } from '../../../src/shared/types'
+import type { GeoPoint, TravelMode } from '../../shared/types'
 import type { RecommendationItem, RecommendationResult } from '../../../cloudfunctions/recommend/index'
-import { FIXED_RESTAURANT_CATEGORIES } from '../../../src/domain/restaurant-categories'
+import { FIXED_RESTAURANT_CATEGORIES } from '../../shared/restaurant-categories'
 import { addFavoriteBatch, recommendPlaces } from '../../services/cloud'
 import { chooseManualLocation, getCurrentLocation } from '../../services/location'
 

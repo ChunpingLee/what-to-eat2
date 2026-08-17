@@ -4,6 +4,18 @@ exports.createCloudBaseFavoritesRepository = createCloudBaseFavoritesRepository;
 const node_crypto_1 = require("node:crypto");
 const public_places_1 = require("../shared/public-places");
 const account_state_1 = require("../shared/account-state");
+function favoriteDocuments(data) {
+    const values = Array.isArray(data) ? data : data === undefined || data === null ? [] : [data];
+    return values.flatMap(value => {
+        if (typeof value !== 'object' || value === null || Array.isArray(value))
+            return [];
+        const record = value;
+        const candidate = typeof record.data === 'object' && record.data !== null && !Array.isArray(record.data)
+            ? record.data
+            : record;
+        return [candidate];
+    });
+}
 function favoriteDocumentId(openid, poiId) {
     return (0, node_crypto_1.createHash)('sha256').update(`${openid}\0${poiId}`).digest('hex');
 }
@@ -28,7 +40,7 @@ function createCloudBaseFavoritesRepository(database, inQuery = poiIds => ({ $in
             });
             const resolved = await Promise.all(records.map(async (record) => {
                 const found = await places.doc((0, public_places_1.publicPlaceDocumentId)(record.poiId)).get();
-                return { poiId: record.poiId, place: (0, public_places_1.normalizedPublicPlace)(found.data[0]) };
+                return { poiId: record.poiId, place: (0, public_places_1.publicPlaceFromDocumentData)(found.data) };
             }));
             return {
                 items: resolved.flatMap(item => item.place ? [item.place] : []),
@@ -48,10 +60,9 @@ function createCloudBaseFavoritesRepository(database, inQuery = poiIds => ({ $in
                 const id = favoriteDocumentId(openid, poiId);
                 const favorite = transaction.collection('favorites').doc(id);
                 const found = await favorite.get();
-                if (found.data.some(value => typeof value === 'object' && value !== null
-                    && value.poiId === poiId))
+                if (favoriteDocuments(found.data).some(value => value.poiId === poiId))
                     return { poiId, status: 'existing' };
-                await favorite.set({ data: { _id: id, poiId, _openid: openid, createdAt } });
+                await favorite.set({ _id: id, poiId, _openid: openid, createdAt });
                 return { poiId, status: 'created' };
             })));
             const deleting = outcomes.find((outcome) => outcome.status === 'rejected'

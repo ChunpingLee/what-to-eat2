@@ -4,6 +4,7 @@ exports.AmapTimeoutError = void 0;
 exports.createAmapHttp = createAmapHttp;
 exports.createAmapClient = createAmapClient;
 const errors_1 = require("../../src/shared/errors");
+const https_json_1 = require("../shared/https-json");
 class AmapTimeoutError extends errors_1.SafeError {
     constructor() { super('AMAP_TIMEOUT', 'Place search timed out'); }
 }
@@ -69,7 +70,7 @@ function mapPoi(value) {
         ...(businessStatus ? { businessStatus } : {}),
     };
 }
-function createAmapHttp(fetcher = fetch) {
+function createAmapHttp(fetcher = (0, https_json_1.createHttpsJsonFetch)(), diagnostic = value => console.error(value)) {
     return async (query) => {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 8_000);
@@ -97,6 +98,16 @@ function createAmapHttp(fetcher = fetch) {
                 throw new AmapTimeoutError();
             if (error instanceof errors_1.SafeError)
                 throw error;
+            const record = typeof error === 'object' && error !== null ? error : undefined;
+            const source = error instanceof Error
+                ? error.stack?.match(/\/var\/user\/[^?():\s]+:\d+:\d+/)?.[0]
+                : undefined;
+            diagnostic({
+                event: 'AMAP_HTTP_FAILED',
+                errorName: error instanceof Error ? error.name.slice(0, 64) : typeof error,
+                ...(typeof record?.code === 'string' ? { errorCode: record.code.slice(0, 64) } : {}),
+                ...(source ? { source } : {}),
+            });
             throw new errors_1.SafeError('AMAP_UNAVAILABLE', 'Place search is temporarily unavailable');
         }
         finally {
@@ -104,7 +115,7 @@ function createAmapHttp(fetcher = fetch) {
         }
     };
 }
-function createAmapClient({ key = process.env.AMAP_WEB_KEY, http = createAmapHttp() } = {}) {
+function createAmapClient({ key = process.env.AMAP_WEB_KEY, http = createAmapHttp(), diagnostic = value => console.error(value), } = {}) {
     if (!key)
         throw new errors_1.SafeError('AMAP_NOT_CONFIGURED', 'Place search is not configured');
     return {
@@ -120,6 +131,11 @@ function createAmapClient({ key = process.env.AMAP_WEB_KEY, http = createAmapHtt
                 pageSize: 25,
             });
             if (response.status !== '1' || !Array.isArray(response.pois)) {
+                diagnostic({
+                    event: 'AMAP_API_REJECTED',
+                    ...(typeof response.status === 'string' ? { status: response.status.slice(0, 16) } : {}),
+                    ...(typeof response.infocode === 'string' ? { infocode: response.infocode.slice(0, 32) } : {}),
+                });
                 throw new errors_1.SafeError('AMAP_UNAVAILABLE', 'Place search is temporarily unavailable');
             }
             return response.pois.flatMap(poi => {

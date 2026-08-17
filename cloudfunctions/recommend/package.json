@@ -6,7 +6,7 @@
     "build": "tsc --project tsconfig.json"
   },
   "dependencies": {
-    "@cloudbase/node-sdk": "^3.18.3"
+    "@cloudbase/node-sdk": "3.18.5"
   },
   "devDependencies": {
     "typescript": "^5.9.0"

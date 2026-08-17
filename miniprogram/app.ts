@@ -5,8 +5,7 @@ interface MiniProgramApp {
 
 App<MiniProgramApp>({
   globalData: {
-    // Replace with a specific CloudBase environment ID for an explicit deployment target.
-    cloudEnvironment: wx.cloud.DYNAMIC_CURRENT_ENV,
+    cloudEnvironment: 'cloud1-d9gwjmdaj73a7dc0d',
   },
   onLaunch(this: MiniProgramApp) {
     wx.cloud.init({ env: this.globalData.cloudEnvironment })

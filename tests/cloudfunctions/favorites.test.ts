@@ -195,10 +195,10 @@ function transactionalFavoritesDatabase(failingPoiId?: string) {
   let transactionQueue: Promise<unknown> = Promise.resolve()
   const transactionCollection = (name: keyof typeof records) => ({
     doc: (id: string) => ({
-      get: async () => ({ data: records[name].has(id) ? [records[name].get(id)] : [] }),
-      set: async ({ data }: { data: Record<string, unknown> }) => {
-        if (name === 'favorites' && data.poiId === failingPoiId) throw { code: 'DATABASE_PERMISSION_DENIED' }
-        records[name].set(id, data)
+      get: async () => ({ data: records[name].get(id) }),
+      set: async (body: Record<string, unknown>) => {
+        if (name === 'favorites' && body.poiId === failingPoiId) throw { code: 'DATABASE_PERMISSION_DENIED' }
+        records[name].set(id, body)
       },
       remove: async () => { records[name].delete(id) },
     }),

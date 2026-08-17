@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.PublicPlacePersistenceError = void 0;
 exports.publicPlaceDocumentId = publicPlaceDocumentId;
 exports.normalizedPublicPlace = normalizedPublicPlace;
+exports.publicPlaceFromDocumentData = publicPlaceFromDocumentData;
 exports.createCloudBasePublicPlaceStore = createCloudBasePublicPlaceStore;
 const node_crypto_1 = require("node:crypto");
 class PublicPlacePersistenceError extends Error {
@@ -61,6 +62,15 @@ function normalizedPublicPlace(value) {
         ...(businessStatus ? { businessStatus } : {}),
     };
 }
+function publicPlaceFromDocumentData(data) {
+    const first = Array.isArray(data) ? data[0] : data;
+    const direct = normalizedPublicPlace(first);
+    if (direct)
+        return direct;
+    if (typeof first !== 'object' || first === null || Array.isArray(first))
+        return undefined;
+    return normalizedPublicPlace(first.data);
+}
 function createCloudBasePublicPlaceStore(database) {
     const places = database.collection('places');
     return {
@@ -69,7 +79,7 @@ function createCloudBasePublicPlaceStore(database) {
                 const place = normalizedPublicPlace(item);
                 if (!place)
                     throw new Error('INVALID_PUBLIC_PLACE');
-                await places.doc(publicPlaceDocumentId(place.poiId)).set({ data: { ...place, sourceUpdatedAt } });
+                await places.doc(publicPlaceDocumentId(place.poiId)).set({ ...place, sourceUpdatedAt });
             }));
             const failedCount = results.filter(result => result.status === 'rejected').length;
             if (failedCount)
@@ -78,14 +88,15 @@ function createCloudBasePublicPlaceStore(database) {
         async findPublicByPoiId(poiId) {
             try {
                 const direct = await places.doc(publicPlaceDocumentId(poiId)).get();
-                if (direct.data[0])
-                    return direct.data[0];
+                const place = publicPlaceFromDocumentData(direct.data);
+                if (place)
+                    return place;
             }
             catch {
                 // Compatibility fallback supports records created before deterministic IDs.
             }
             const legacy = await places.where({ poiId }).limit(1).get();
-            return legacy.data[0];
+            return publicPlaceFromDocumentData(legacy.data);
         },
     };
 }

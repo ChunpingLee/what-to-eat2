@@ -1,4 +1,5 @@
 import type { GeoPoint, TravelMode } from '../../src/shared/types'
+import { createHttpsJsonFetch } from '../shared/https-json'
 import type { RouteRateLimiter } from './rate-limiter'
 
 export interface RouteTimesClient {
@@ -29,7 +30,7 @@ type FetchLike = (input: string, init: { signal: AbortSignal }) => Promise<{ ok:
 
 const endpointByMode: Record<TravelMode, string> = {
   walking: '/v5/direction/walking',
-  bicycling: '/v5/direction/bicycling',
+  bicycling: '/v4/direction/bicycling',
   driving: '/v5/direction/driving',
 }
 
@@ -47,16 +48,19 @@ function firstRecord(value: unknown): Record<string, unknown> | undefined {
   return Array.isArray(value) ? record(value[0]) : undefined
 }
 
-function durationSeconds(response: unknown): number | undefined {
+function durationSeconds(response: unknown, mode: TravelMode): number | undefined {
   const body = record(response)
-  if (body?.status !== '1') return undefined
-  const path = firstRecord(record(body.route)?.paths)
-  const raw = record(path?.cost)?.duration
+  if (mode === 'bicycling' && body?.errcode !== 0 && body?.errcode !== '0') return undefined
+  if (mode !== 'bicycling' && body?.status !== '1') return undefined
+  const path = mode === 'bicycling'
+    ? firstRecord(record(body?.data)?.paths)
+    : firstRecord(record(body?.route)?.paths)
+  const raw = mode === 'bicycling' ? path?.duration : record(path?.cost)?.duration
   const duration = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() ? Number(raw) : NaN
   return Number.isFinite(duration) && duration >= 0 ? duration : undefined
 }
 
-export function createAmapRouteHttp(fetcher: FetchLike = fetch, now: () => number = Date.now): AmapRouteHttp {
+export function createAmapRouteHttp(fetcher: FetchLike = createHttpsJsonFetch(), now: () => number = Date.now): AmapRouteHttp {
   return async query => {
     const remainingMs = query.deadlineMs - now()
     if (remainingMs <= 0) throw new AmapRoutesError('AMAP_ROUTES_UNAVAILABLE', '路线时间暂时无法计算')
@@ -67,8 +71,8 @@ export function createAmapRouteHttp(fetcher: FetchLike = fetch, now: () => numbe
         key: query.key,
         origin: query.origin,
         destination: query.destination,
-        show_fields: 'cost',
       })
+      if (query.mode !== 'bicycling') params.set('show_fields', 'cost')
       const response = await fetcher(`https://restapi.amap.com${endpointByMode[query.mode]}?${params}`, {
         signal: controller.signal,
       })
@@ -83,9 +87,11 @@ export function createAmapRouteHttp(fetcher: FetchLike = fetch, now: () => numbe
   }
 }
 
-function validPoint(point: GeoPoint): boolean {
-  return Number.isFinite(point.latitude) && point.latitude >= -90 && point.latitude <= 90
-    && Number.isFinite(point.longitude) && point.longitude >= -180 && point.longitude <= 180
+function validPoint(point: unknown): point is GeoPoint {
+  if (typeof point !== 'object' || point === null || Array.isArray(point)) return false
+  const candidate = point as Partial<GeoPoint>
+  return Number.isFinite(candidate.latitude) && candidate.latitude! >= -90 && candidate.latitude! <= 90
+    && Number.isFinite(candidate.longitude) && candidate.longitude! >= -180 && candidate.longitude! <= 180
 }
 
 export function createAmapRoutesClient({
@@ -107,7 +113,9 @@ export function createAmapRoutesClient({
   }
   return {
     async times(origin, destinations, mode) {
-      if (!validPoint(origin) || destinations.length > 20 || destinations.some(point => !validPoint(point))) {
+      if (!validPoint(origin) || !Array.isArray(destinations) || destinations.length > 20
+        || destinations.some(point => !validPoint(point))
+        || !['walking', 'bicycling', 'driving'].includes(mode)) {
         throw new AmapRoutesError('AMAP_ROUTES_UNAVAILABLE', '路线时间暂时无法计算')
       }
       if (destinations.length === 0) return []
@@ -121,7 +129,7 @@ export function createAmapRoutesClient({
           mode,
           deadlineMs,
         })
-        const seconds = durationSeconds(response)
+        const seconds = durationSeconds(response, mode)
         if (seconds === undefined) throw new AmapRoutesError('AMAP_ROUTES_UNAVAILABLE', '路线时间暂时无法计算')
         return Math.ceil(seconds / 60)
       }))

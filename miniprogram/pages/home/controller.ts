@@ -1,6 +1,6 @@
-import { sortNearbyFavorites, type NearbyFavorite, type Place } from '../../../src/domain/favorites'
-import type { GeoPoint } from '../../../src/shared/types'
-import { buildShareDetailPath } from '../../../src/domain/share'
+import { sortNearbyFavorites, type NearbyFavorite, type Place } from '../../shared/favorites'
+import type { GeoPoint } from '../../shared/types'
+import { buildShareDetailPath } from '../../shared/share'
 
 export type HomeFavorite = NearbyFavorite & { poiId: string; detailPath: string }
 

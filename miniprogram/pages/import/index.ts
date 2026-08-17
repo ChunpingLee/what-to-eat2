@@ -1,5 +1,5 @@
-import { distanceMeters } from '../../../src/domain/geo'
-import type { GeoPoint } from '../../../src/shared/types'
+import { distanceMeters } from '../../shared/geo'
+import type { GeoPoint } from '../../shared/types'
 import { applyBatchResult, type BranchItem, type FavoriteBatchResult } from '../../components/branch-picker/index'
 import {
   addFavoriteBatch,

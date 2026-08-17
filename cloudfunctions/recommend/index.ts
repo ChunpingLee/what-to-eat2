@@ -65,6 +65,7 @@ function validBudget(budget: RecommendationRequest['budget']): boolean {
 }
 
 function validate(request: RecommendationRequest): void {
+  if (!request || typeof request !== 'object') throw new RecommendationRequestError()
   const hasPreference = Boolean(text(request.category) || text(request.keywords) || request.random)
   if (!hasPreference || !validPoint(request.center)
     || !finite(request.radiusMeters) || request.radiusMeters <= 0 || request.radiusMeters > 50_000
@@ -193,6 +194,7 @@ export function main(
   _context: unknown,
   sdk: CloudBaseSdk = require('@cloudbase/node-sdk') as CloudBaseSdk,
 ) {
+  validate(event)
   const app = sdk.init({ env: sdk.SYMBOL_CURRENT_ENV })
   const database = app.database()
   const searchService = createPlaceSearchService({

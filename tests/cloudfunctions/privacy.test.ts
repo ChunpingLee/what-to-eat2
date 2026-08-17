@@ -301,8 +301,8 @@ function accountLifecycleDatabase() {
     Record<typeof names[number], Map<string, Record<string, unknown>>>
   let queue: Promise<unknown> = Promise.resolve()
   const doc = (name: typeof names[number], id: string) => ({
-    get: async () => ({ data: records[name].has(id) ? [records[name].get(id)] : [] }),
-    set: async ({ data }: { data: Record<string, unknown> }) => { records[name].set(id, data) },
+    get: async () => ({ data: records[name].get(id) }),
+    set: async (body: Record<string, unknown>) => { records[name].set(id, body) },
     remove: async () => { records[name].delete(id) },
   })
   return {

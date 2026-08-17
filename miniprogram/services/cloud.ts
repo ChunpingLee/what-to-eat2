@@ -1,5 +1,5 @@
-import type { Place } from '../../src/domain/favorites'
-import type { GeoPoint } from '../../src/shared/types'
+import type { Place } from '../shared/favorites'
+import type { GeoPoint } from '../shared/types'
 import type { RecommendationRequest } from '../../src/domain/recommendation'
 import type { RecommendationResult } from '../../cloudfunctions/recommend/index'
 

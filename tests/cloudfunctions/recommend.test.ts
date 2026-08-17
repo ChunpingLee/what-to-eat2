@@ -6,10 +6,12 @@ import type { RecommendationRequest } from '../../src/domain/recommendation'
 import {
   createRecommendHandler,
   createLazyRouteTimesClient,
+  main as recommendMain,
   type RecommendationSearchClient,
   type RouteTimesClient,
 } from '../../cloudfunctions/recommend/index'
 import { createAmapRouteHttp, createAmapRoutesClient } from '../../cloudfunctions/place-routes/amap-routes'
+import { main as placeRoutesMain } from '../../cloudfunctions/place-routes/index'
 import { createAmapClient, createAmapHttp } from '../../cloudfunctions/place-search/amap-client'
 import {
   buildRecommendationInput,
@@ -179,12 +181,29 @@ describe('recommend cloud function', () => {
     })
     expect(deps.searchClient.search).not.toHaveBeenCalled()
   })
+
+  it('rejects a malformed cloud event without a naked TypeError', async () => {
+    const database = { collection: vi.fn(), runTransaction: vi.fn() }
+    const sdk = {
+      SYMBOL_CURRENT_ENV: Symbol('current'),
+      init: () => ({ database: () => database }),
+    }
+
+    let thrown: unknown
+    try { recommendMain(undefined as never, {}, sdk as never) } catch (error) { thrown = error }
+    expect(thrown).toMatchObject({
+      name: 'RecommendationRequestError', code: 'INVALID_RECOMMENDATION_REQUEST',
+    })
+  })
 })
 
 describe('Amap route client', () => {
-  it('maps walking, bicycling and driving to their real endpoints and rounds seconds up to minutes', async () => {
+  it('uses V5 cost for walking/driving and the V4 response contract for bicycling', async () => {
     const fetcher = vi.fn().mockImplementation(async (input: string) => {
-      return { ok: true, json: async () => ({ status: '1', route: { paths: [{ cost: { duration: '601' } }] } }) }
+      const path = new URL(input).pathname
+      return path === '/v4/direction/bicycling'
+        ? { ok: true, json: async () => ({ errcode: 0, data: { paths: [{ duration: 601 }] } }) }
+        : { ok: true, json: async () => ({ status: '1', route: { paths: [{ cost: { duration: '601' } }] } }) }
     })
     const client = createAmapRoutesClient({ key: 'server-only', http: createAmapRouteHttp(fetcher as never), limiter: unlimitedLimiter })
 
@@ -193,15 +212,27 @@ describe('Amap route client', () => {
     await expect(client.times(center, [place(1).location], 'driving')).resolves.toEqual([11])
 
     expect(fetcher.mock.calls.map(call => new URL(call[0] as string).pathname)).toEqual([
-      '/v5/direction/walking', '/v5/direction/bicycling', '/v5/direction/driving',
+      '/v5/direction/walking', '/v4/direction/bicycling', '/v5/direction/driving',
     ])
-    for (const [input] of fetcher.mock.calls) {
+    for (const [input] of [fetcher.mock.calls[0], fetcher.mock.calls[2]]) {
       const params = new URL(input as string).searchParams
       expect(params.get('key')).toBe('server-only')
       expect(params.get('origin')).toBe('121.47,31.23')
       expect(params.get('destination')).toBe('121.47,31.2301')
       expect(params.get('show_fields')).toBe('cost')
     }
+    expect(new URL(fetcher.mock.calls[1][0] as string).searchParams.has('show_fields')).toBe(false)
+  })
+
+  it('wraps malformed place-routes events instead of leaking TypeError', async () => {
+    const sdk = {
+      SYMBOL_CURRENT_ENV: Symbol('current'),
+      init: () => ({ database: () => ({ runTransaction: vi.fn() }) }),
+    }
+
+    await expect(placeRoutesMain(undefined as never, {}, sdk as never)).rejects.toMatchObject({
+      name: 'AmapRoutesError', code: 'AMAP_ROUTES_UNAVAILABLE',
+    })
   })
 
   it('represents one failed destination as unavailable without discarding successful routes', async () => {

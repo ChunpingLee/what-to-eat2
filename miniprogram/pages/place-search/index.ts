@@ -1,8 +1,8 @@
-import { distanceMeters } from '../../../src/domain/geo'
-import type { GeoPoint } from '../../../src/shared/types'
+import { distanceMeters } from '../../shared/geo'
+import type { GeoPoint } from '../../shared/types'
 import { applyBatchResult, type BranchItem, type FavoriteBatchResult } from '../../components/branch-picker/index'
 import { addFavoriteBatch, listFavorites, searchPlaces, type PlaceSearchResult } from '../../services/cloud'
-import type { Place } from '../../../src/domain/favorites'
+import type { Place } from '../../shared/favorites'
 import { chooseManualLocation, getCurrentLocation } from '../../services/location'
 
 type SearchStatus = 'idle' | 'searching' | 'ready' | 'empty' | 'error'

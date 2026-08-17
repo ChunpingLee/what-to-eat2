@@ -1,4 +1,4 @@
-import type { GeoPoint } from '../../../src/shared/types'
+import type { GeoPoint } from '../../shared/types'
 import { listFavorites } from '../../services/cloud'
 import { chooseManualLocation, getCurrentLocation } from '../../services/location'
 import { createHomeController, type HomeFavorite } from './controller'

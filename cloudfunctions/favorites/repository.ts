@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { Place } from '../../src/domain/favorites'
-import { normalizedPublicPlace, publicPlaceDocumentId } from '../shared/public-places'
+import { publicPlaceDocumentId, publicPlaceFromDocumentData } from '../shared/public-places'
 import {
   AccountDeletingError,
   ensureAccountWritable,
@@ -28,9 +28,21 @@ interface CloudBaseCollection {
 
 export interface CloudBaseFavoritesDatabase {
   collection(name: 'favorites' | 'places'): CloudBaseCollection & {
-    doc(id: string): { get(): Promise<{ data: unknown[] }> }
+    doc(id: string): { get(): Promise<{ data: unknown }> }
   }
   runTransaction<T>(callback: (transaction: AccountTransaction) => Promise<T>): Promise<T>
+}
+
+function favoriteDocuments(data: unknown): Array<Record<string, unknown>> {
+  const values = Array.isArray(data) ? data : data === undefined || data === null ? [] : [data]
+  return values.flatMap(value => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return []
+    const record = value as Record<string, unknown>
+    const candidate = typeof record.data === 'object' && record.data !== null && !Array.isArray(record.data)
+      ? record.data as Record<string, unknown>
+      : record
+    return [candidate]
+  })
 }
 
 function favoriteDocumentId(openid: string, poiId: string) {
@@ -63,7 +75,7 @@ export function createCloudBaseFavoritesRepository(
       })
       const resolved = await Promise.all(records.map(async record => {
         const found = await places.doc(publicPlaceDocumentId(record.poiId)).get()
-        return { poiId: record.poiId, place: normalizedPublicPlace(found.data[0]) }
+        return { poiId: record.poiId, place: publicPlaceFromDocumentData(found.data) }
       }))
       return {
         items: resolved.flatMap(item => item.place ? [item.place] : []),
@@ -82,9 +94,8 @@ export function createCloudBaseFavoritesRepository(
         const id = favoriteDocumentId(openid, poiId)
         const favorite = transaction.collection('favorites').doc(id)
         const found = await favorite.get()
-        if (found.data.some(value => typeof value === 'object' && value !== null
-          && (value as { poiId?: unknown }).poiId === poiId)) return { poiId, status: 'existing' as const }
-        await favorite.set({ data: { _id: id, poiId, _openid: openid, createdAt } })
+        if (favoriteDocuments(found.data).some(value => value.poiId === poiId)) return { poiId, status: 'existing' as const }
+        await favorite.set({ _id: id, poiId, _openid: openid, createdAt })
         return { poiId, status: 'created' as const }
       })))
       const deleting = outcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected'

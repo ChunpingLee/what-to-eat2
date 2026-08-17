@@ -1,4 +1,5 @@
 import {
+  accountStateFromDocumentData,
   accountDocumentId,
   type AccountTransaction,
 } from '../shared/account-state'
@@ -88,11 +89,11 @@ export function createCloudBaseDeleteRepository(
         const id = accountDocumentId(openid)
         const account = transaction.collection('users').doc(id)
         const result = await account.get()
-        const state = result.data[0] as { status?: unknown } | undefined
+        const state = accountStateFromDocumentData(result.data)
         if (state?.status === 'deleting') return
-        await account.set({ data: {
+        await account.set({
           _id: id, _openid: openid, status: 'deleting', updatedAt: now().toISOString(),
-        } })
+        })
       })
     },
     async deleteOwned(openid, collections) {
@@ -117,7 +118,7 @@ export function createCloudBaseDeleteRepository(
       return database.runTransaction(async transaction => {
         const account = transaction.collection('users').doc(accountDocumentId(openid))
         const result = await account.get()
-        const state = result.data[0] as { status?: unknown } | undefined
+        const state = accountStateFromDocumentData(result.data)
         if (!state) return 0
         if (state.status !== 'deleting') throw new Error('ACCOUNT_DELETE_STATE_CHANGED')
         await account.remove()

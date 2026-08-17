@@ -1,7 +1,7 @@
-import type { Place } from '../../../src/domain/favorites'
+import type { Place } from '../../shared/favorites'
 import type { FavoriteBatchResult } from '../../services/cloud'
 import { addFavoriteBatch, resolveSharedPlace } from '../../services/cloud'
-import { buildShareDetailPath, validateSharePoiId } from '../../../src/domain/share'
+import { buildShareDetailPath, validateSharePoiId } from '../../shared/share'
 
 export interface ShareOptions { v: 1; poiId: string }
 

@@ -54,12 +54,12 @@ function createCloudBaseDeleteRepository(database, options = {}) {
                 const id = (0, account_state_1.accountDocumentId)(openid);
                 const account = transaction.collection('users').doc(id);
                 const result = await account.get();
-                const state = result.data[0];
+                const state = (0, account_state_1.accountStateFromDocumentData)(result.data);
                 if (state?.status === 'deleting')
                     return;
-                await account.set({ data: {
-                        _id: id, _openid: openid, status: 'deleting', updatedAt: now().toISOString(),
-                    } });
+                await account.set({
+                    _id: id, _openid: openid, status: 'deleting', updatedAt: now().toISOString(),
+                });
             });
         },
         async deleteOwned(openid, collections) {
@@ -87,7 +87,7 @@ function createCloudBaseDeleteRepository(database, options = {}) {
             return database.runTransaction(async (transaction) => {
                 const account = transaction.collection('users').doc((0, account_state_1.accountDocumentId)(openid));
                 const result = await account.get();
-                const state = result.data[0];
+                const state = (0, account_state_1.accountStateFromDocumentData)(result.data);
                 if (!state)
                     return 0;
                 if (state.status !== 'deleting')

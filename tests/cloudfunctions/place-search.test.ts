@@ -2,7 +2,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { AmapTimeoutError, createAmapClient, createAmapHttp } from '../../cloudfunctions/place-search/amap-client'
-import { createPlaceSearchService, createMemorySearchCache } from '../../cloudfunctions/place-search/cache'
+import { createCloudBaseSearchCache, createPlaceSearchService, createMemorySearchCache } from '../../cloudfunctions/place-search/cache'
+import { main as placeSearchMain } from '../../cloudfunctions/place-search/index'
 import {
   createCloudBasePublicPlaceStore,
   publicPlaceDocumentId,
@@ -15,8 +16,137 @@ const query = {
   city: ' 上海 ',
   radiusMeters: 5_000,
 }
+const DeployedSafeError = require('../../cloudfunctions/place-search/dist/src/shared/errors.js').SafeError as typeof Error
 
 describe('place search cloud function', () => {
+  it.each([
+    {
+      expectedStage: 'SDK_INIT',
+      sdk: { SYMBOL_CURRENT_ENV: Symbol('current'), init: () => { throw new TypeError('private sdk detail') } },
+      event: query,
+      expectedCode: 'AMAP_UNAVAILABLE',
+    },
+    {
+      expectedStage: 'DATABASE_INIT',
+      sdk: {
+        SYMBOL_CURRENT_ENV: Symbol('current'),
+        init: () => ({ database: () => { throw new TypeError('private database detail') } }),
+      },
+      event: query,
+      expectedCode: 'AMAP_UNAVAILABLE',
+    },
+    {
+      expectedStage: 'ADAPTER_INIT',
+      sdk: {
+        SYMBOL_CURRENT_ENV: Symbol('current'),
+        init: () => ({ database: () => ({ collection: () => { throw new TypeError('private adapter detail') } }) }),
+      },
+      event: query,
+      expectedCode: 'AMAP_UNAVAILABLE',
+    },
+    {
+      expectedStage: 'SERVICE_CALL',
+      sdk: {
+        SYMBOL_CURRENT_ENV: Symbol('current'),
+        init: () => ({ database: () => ({
+          collection: () => ({
+            doc: () => ({ get: async () => ({ data: [] }), set: async () => undefined }),
+            where: () => ({ limit: () => ({ get: async () => ({ data: [] }) }) }),
+          }),
+        }) }),
+      },
+      event: {},
+      expectedCode: 'INVALID_SEARCH_QUERY',
+    },
+  ])('puts its build id and $expectedStage in the final safe error', async ({ expectedStage, sdk, event, expectedCode }) => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    vi.stubEnv('AMAP_WEB_KEY', 'server-only')
+    let thrown: unknown
+    try {
+      await placeSearchMain(event as never, {}, sdk as never)
+    } catch (error) {
+      thrown = error
+    } finally {
+      errorLog.mockRestore()
+      vi.unstubAllEnvs()
+    }
+
+    expect(thrown).toMatchObject({ name: 'SafeError', code: expectedCode })
+    expect(thrown).toBeInstanceOf(DeployedSafeError)
+    const safe = thrown as Error
+    expect(safe.message).toContain('place-search-20260817-node16-v1')
+    expect(safe.message).toContain(expectedStage)
+    expect(safe.stack).toContain(expectedStage)
+    expect(`${safe.message}\n${safe.stack}`).not.toContain('private')
+  })
+
+  it('uses the CloudBase server root document contract and reads object, array, and legacy cache shapes', async () => {
+    const entry = {
+      key: 'cache-key', cachedAt: 1_000,
+      result: { items: [], sourceUpdatedAt: new Date(1_000).toISOString() },
+    }
+    let stored: unknown
+    let returned: unknown = entry
+    const cache = createCloudBaseSearchCache({
+      collection: () => ({
+        doc: () => ({
+          get: async () => ({ data: returned }),
+          set: async (body: typeof entry) => { stored = body },
+        }),
+      }),
+    } as never)
+
+    await cache.set(entry)
+    expect(stored).toEqual(entry)
+    await expect(cache.get(entry.key)).resolves.toEqual(entry)
+    returned = [entry]
+    await expect(cache.get(entry.key)).resolves.toEqual(entry)
+    returned = { data: entry }
+    await expect(cache.get(entry.key)).resolves.toEqual(entry)
+  })
+
+  it('rejects malformed cloud events as a safe validation error instead of TypeError', async () => {
+    const service = createPlaceSearchService({
+      client: { search: vi.fn() },
+      cache: createMemorySearchCache(),
+    })
+
+    await expect(service.searchPlaces({} as typeof query)).rejects.toMatchObject({
+      name: 'SafeError', code: 'INVALID_SEARCH_QUERY', message: 'Invalid place search query',
+    })
+  })
+
+  it('marks a cache read failure with a safe diagnostic stage', async () => {
+    const service = createPlaceSearchService({
+      client: { search: vi.fn() },
+      cache: { get: vi.fn().mockRejectedValue(new TypeError('private SDK detail')), set: vi.fn() },
+    })
+
+    await expect(service.searchPlaces(query)).rejects.toMatchObject({
+      name: 'SafeError', code: 'AMAP_UNAVAILABLE', diagnosticStage: 'CACHE_READ',
+    })
+    await expect(service.searchPlaces(query)).rejects.not.toThrow('private SDK detail')
+  })
+
+  it('reports a safe transport diagnostic without leaking the requested URL', async () => {
+    const diagnostic = vi.fn()
+    const transportError = new TypeError('request failed for https://restapi.amap.com/?key=secret')
+    transportError.stack = 'TypeError\n    at request (/var/user/dist/cloudfunctions/shared/https-json.js:31:9)'
+    const http = createAmapHttp(vi.fn().mockRejectedValue(transportError), diagnostic)
+
+    await expect(http({
+      key: 'secret', keywords: '店', location: '121.47,31.23', radius: 5_000,
+      region: '上海', cityLimit: true, showFields: 'business,photos',
+    })).rejects.toMatchObject({ code: 'AMAP_UNAVAILABLE' })
+
+    expect(diagnostic).toHaveBeenCalledWith({
+      event: 'AMAP_HTTP_FAILED', errorName: 'TypeError',
+      source: '/var/user/dist/cloudfunctions/shared/https-json.js:31:9',
+    })
+    expect(JSON.stringify(diagnostic.mock.calls)).not.toContain('secret')
+    expect(JSON.stringify(diagnostic.mock.calls)).not.toContain('restapi')
+  })
+
   it('persists a normalized Amap result so share resolution reads the same public POI', async () => {
     const documents = new Map<string, Record<string, unknown>>()
     const database = publicPlacesDatabase(documents)
@@ -164,6 +294,7 @@ describe('place search cloud function', () => {
   })
 
   it('rejects V5 business failures without exposing Amap details or caching stale data', async () => {
+    const diagnostic = vi.fn()
     const cache = createMemorySearchCache()
     const cachedAt = 1_000_000 - 31 * 60 * 1_000
     await cache.set({
@@ -175,6 +306,7 @@ describe('place search cloud function', () => {
     const client = createAmapClient({
       key: 'server-only',
       http: vi.fn().mockResolvedValue({ status: '0', info: 'INVALID_USER_KEY', infocode: '10001', pois: [] }),
+      diagnostic,
     })
     const service = createPlaceSearchService({ client, cache, now: () => 1_000_000 })
 
@@ -183,6 +315,9 @@ describe('place search cloud function', () => {
     })
     await expect(service.searchPlaces(query)).rejects.not.toThrow('INVALID_USER_KEY')
     expect(set).not.toHaveBeenCalled()
+    expect(diagnostic).toHaveBeenCalledWith({ event: 'AMAP_API_REJECTED', status: '0', infocode: '10001' })
+    expect(JSON.stringify(diagnostic.mock.calls)).not.toContain('server-only')
+    expect(JSON.stringify(diagnostic.mock.calls)).not.toContain('INVALID_USER_KEY')
   })
 
   it('uses a normalized cache key containing every query parameter', async () => {
@@ -233,8 +368,8 @@ function publicPlacesDatabase(documents: Map<string, Record<string, unknown>>) {
   return {
     collection: vi.fn(() => ({
       doc: vi.fn((id: string) => ({
-        set: async ({ data }: { data: Record<string, unknown> }) => { documents.set(id, data) },
-        get: async () => ({ data: documents.has(id) ? [documents.get(id)] : [] }),
+        set: async (body: Record<string, unknown>) => { documents.set(id, body) },
+        get: async () => ({ data: documents.get(id) }),
       })),
       where: vi.fn((query: { poiId: string }) => ({
         limit: vi.fn(() => ({

@@ -1,6 +1,7 @@
 import type { Place } from '../../src/domain/favorites'
 import { SafeError } from '../../src/shared/errors'
 import type { GeoPoint } from '../../src/shared/types'
+import { createHttpsJsonFetch } from '../shared/https-json'
 
 export interface PlaceSearchQuery {
   keywords: string
@@ -23,6 +24,9 @@ export interface AmapHttpQuery {
 export type AmapHttp = (query: AmapHttpQuery) => Promise<AmapResponse>
 
 export interface PlaceSearchClient { search(query: PlaceSearchQuery): Promise<Place[]> }
+export type AmapDiagnostic =
+  | { event: 'AMAP_API_REJECTED'; status?: string; infocode?: string }
+  | { event: 'AMAP_HTTP_FAILED'; errorName: string; errorCode?: string; source?: string }
 
 export class AmapTimeoutError extends SafeError {
   constructor() { super('AMAP_TIMEOUT', 'Place search timed out') }
@@ -94,7 +98,10 @@ function mapPoi(value: unknown): Place | undefined {
 
 type FetchLike = (input: string, init: { signal: AbortSignal }) => Promise<{ ok: boolean; json(): Promise<unknown> }>
 
-export function createAmapHttp(fetcher: FetchLike = fetch): AmapHttp {
+export function createAmapHttp(
+  fetcher: FetchLike = createHttpsJsonFetch(),
+  diagnostic: (value: AmapDiagnostic) => void = value => console.error(value),
+): AmapHttp {
   return async query => {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 8_000)
@@ -117,6 +124,16 @@ export function createAmapHttp(fetcher: FetchLike = fetch): AmapHttp {
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') throw new AmapTimeoutError()
       if (error instanceof SafeError) throw error
+      const record = typeof error === 'object' && error !== null ? error as Record<string, unknown> : undefined
+      const source = error instanceof Error
+        ? error.stack?.match(/\/var\/user\/[^?():\s]+:\d+:\d+/)?.[0]
+        : undefined
+      diagnostic({
+        event: 'AMAP_HTTP_FAILED',
+        errorName: error instanceof Error ? error.name.slice(0, 64) : typeof error,
+        ...(typeof record?.code === 'string' ? { errorCode: record.code.slice(0, 64) } : {}),
+        ...(source ? { source } : {}),
+      })
       throw new SafeError('AMAP_UNAVAILABLE', 'Place search is temporarily unavailable')
     } finally {
       clearTimeout(timer)
@@ -124,7 +141,11 @@ export function createAmapHttp(fetcher: FetchLike = fetch): AmapHttp {
   }
 }
 
-export function createAmapClient({ key = process.env.AMAP_WEB_KEY, http = createAmapHttp() }: { key?: string; http?: AmapHttp } = {}): PlaceSearchClient {
+export function createAmapClient({
+  key = process.env.AMAP_WEB_KEY,
+  http = createAmapHttp(),
+  diagnostic = value => console.error(value),
+}: { key?: string; http?: AmapHttp; diagnostic?: (value: AmapDiagnostic) => void } = {}): PlaceSearchClient {
   if (!key) throw new SafeError('AMAP_NOT_CONFIGURED', 'Place search is not configured')
   return {
     async search(query) {
@@ -139,6 +160,11 @@ export function createAmapClient({ key = process.env.AMAP_WEB_KEY, http = create
         pageSize: 25,
       })
       if (response.status !== '1' || !Array.isArray(response.pois)) {
+        diagnostic({
+          event: 'AMAP_API_REJECTED',
+          ...(typeof response.status === 'string' ? { status: response.status.slice(0, 16) } : {}),
+          ...(typeof response.infocode === 'string' ? { infocode: response.infocode.slice(0, 32) } : {}),
+        })
         throw new SafeError('AMAP_UNAVAILABLE', 'Place search is temporarily unavailable')
       }
       return response.pois.flatMap(poi => {

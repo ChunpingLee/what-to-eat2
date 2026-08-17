@@ -13,6 +13,21 @@ export interface PlaceSearchCache {
 
 export const FRESH_CACHE_TTL_MS = 30 * 60 * 1_000
 export const STALE_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1_000
+type PlaceSearchDiagnosticStage = 'CACHE_READ' | 'AMAP_SEARCH' | 'CACHE_WRITE'
+
+async function atStage<T>(stage: PlaceSearchDiagnosticStage, task: () => Promise<T>): Promise<T> {
+  try {
+    return await task()
+  } catch (error) {
+    const safe = error instanceof SafeError
+      ? error as SafeError & { diagnosticStage?: PlaceSearchDiagnosticStage }
+      : Object.assign(new SafeError('AMAP_UNAVAILABLE', 'Place search is temporarily unavailable'), {
+        diagnosticStage: stage,
+      })
+    safe.diagnosticStage = stage
+    throw safe
+  }
+}
 
 function normalizeText(value: string) { return value.trim().toLocaleLowerCase('zh-CN') }
 
@@ -37,8 +52,13 @@ export function createMemorySearchCache(): PlaceSearchCache & { keyFor(query: Pl
 }
 
 function validate(query: PlaceSearchQuery) {
-  if (!query.keywords.trim() || !Number.isFinite(query.center.latitude) || !Number.isFinite(query.center.longitude)
-    || !Number.isFinite(query.radiusMeters) || query.radiusMeters <= 0) {
+  if (!query || typeof query !== 'object'
+    || typeof query.keywords !== 'string' || !query.keywords.trim()
+    || typeof query.city !== 'string'
+    || !query.center || typeof query.center !== 'object'
+    || !Number.isFinite(query.center.latitude) || query.center.latitude < -90 || query.center.latitude > 90
+    || !Number.isFinite(query.center.longitude) || query.center.longitude < -180 || query.center.longitude > 180
+    || !Number.isFinite(query.radiusMeters) || query.radiusMeters <= 0 || query.radiusMeters > 50_000) {
     throw new SafeError('INVALID_SEARCH_QUERY', 'Invalid place search query')
   }
 }
@@ -71,7 +91,7 @@ export function createPlaceSearchService(deps: {
     async searchPlaces(query: PlaceSearchQuery): Promise<PlaceSearchResult> {
       validate(query)
       const key = cacheKeyFor(query)
-      const cached = await deps.cache.get(key)
+      const cached = await atStage('CACHE_READ', () => deps.cache.get(key))
       const currentTime = now()
       if (cached && currentTime - cached.cachedAt <= FRESH_CACHE_TTL_MS) {
         await persistPlaces(cached.result)
@@ -79,13 +99,13 @@ export function createPlaceSearchService(deps: {
       }
 
       try {
-        const items = await deps.client.search({
+        const items = await atStage('AMAP_SEARCH', () => deps.client.search({
           ...query,
           keywords: query.keywords.trim(),
           city: query.city.trim(),
-        })
+        }))
         const result = { items, sourceUpdatedAt: new Date(currentTime).toISOString() }
-        await deps.cache.set({ key, cachedAt: currentTime, result })
+        await atStage('CACHE_WRITE', () => deps.cache.set({ key, cachedAt: currentTime, result }))
         await persistPlaces(result)
         return { ...result, stale: false }
       } catch (error) {
@@ -101,18 +121,32 @@ export function createPlaceSearchService(deps: {
 }
 
 interface CloudBaseCacheCollection {
-  doc(key: string): { get(): Promise<{ data: CachedPlaceSearch[] }>; set(options: { data: CachedPlaceSearch }): Promise<unknown> }
+  doc(key: string): { get(): Promise<{ data: unknown }>; set(documentBody: CachedPlaceSearch): Promise<unknown> }
 }
 
 export interface CloudBaseCacheDatabase { collection(name: 'place_search_cache'): CloudBaseCacheCollection }
+
+function cachedSearchFromDocument(data: unknown): CachedPlaceSearch | undefined {
+  const first = Array.isArray(data) ? data[0] : data
+  if (typeof first !== 'object' || first === null || Array.isArray(first)) return undefined
+  const record = first as Record<string, unknown>
+  const candidate = typeof record.data === 'object' && record.data !== null && !Array.isArray(record.data)
+    ? record.data as Record<string, unknown>
+    : record
+  if (typeof candidate.key !== 'string' || !Number.isFinite(candidate.cachedAt)
+    || typeof candidate.result !== 'object' || candidate.result === null || Array.isArray(candidate.result)) return undefined
+  const result = candidate.result as Record<string, unknown>
+  if (!Array.isArray(result.items) || typeof result.sourceUpdatedAt !== 'string') return undefined
+  return candidate as unknown as CachedPlaceSearch
+}
 
 export function createCloudBaseSearchCache(database: CloudBaseCacheDatabase): PlaceSearchCache {
   const collection = database.collection('place_search_cache')
   return {
     async get(key) {
       const result = await collection.doc(key).get()
-      return result.data[0]
+      return cachedSearchFromDocument(result.data)
     },
-    async set(entry) { await collection.doc(entry.key).set({ data: entry }) },
+    async set(entry) { await collection.doc(entry.key).set(entry) },
   }
 }

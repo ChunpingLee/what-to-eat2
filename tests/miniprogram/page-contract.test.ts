@@ -1,24 +1,44 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
 
 const projectRoot = join(__dirname, '../..')
 const read = (path: string) => readFileSync(join(projectRoot, path), 'utf8')
 
+function filesUnder(path: string): string[] {
+  return readdirSync(join(projectRoot, path), { withFileTypes: true }).flatMap(entry => {
+    const child = `${path}/${entry.name}`
+    return entry.isDirectory() ? filesUnder(child) : [child]
+  })
+}
+
 it('initializes CloudBase with the current environment during app launch', () => {
   const app = read('miniprogram/app.ts')
   const cloud = read('miniprogram/services/cloud.ts')
 
-  expect(app).toMatch(/cloudEnvironment:\s*wx\.cloud\.DYNAMIC_CURRENT_ENV/)
+  expect(app).toMatch(/cloudEnvironment:\s*['"]cloud1-d9gwjmdaj73a7dc0d['"]/)
   expect(app).toMatch(/onLaunch\s*\([^)]*\)\s*\{[\s\S]*wx\.cloud\.init\(\{\s*env:\s*this\.globalData\.cloudEnvironment\s*\}\)/)
   expect(cloud).toContain('wx.cloud.callFunction')
 })
 
 it('declares a Mini Program root that the developer tool can import', () => {
-  const config = JSON.parse(read('project.config.json')) as { miniprogramRoot?: string; compileType?: string }
+  const config = JSON.parse(read('project.config.json')) as {
+    miniprogramRoot?: string
+    cloudfunctionRoot?: string
+    compileType?: string
+    setting?: { useCompilerPlugins?: string[] | false }
+  }
 
   expect(config.miniprogramRoot).toBe('miniprogram/')
+  expect(config.cloudfunctionRoot).toBe('cloudfunctions/')
+  expect(config.setting?.useCompilerPlugins).toContain('typescript')
   expect(config.compileType).toBe('miniprogram')
+})
+
+it('keeps every Mini Program runtime import inside the package root', () => {
+  for (const path of filesUnder('miniprogram').filter(path => path.endsWith('.ts'))) {
+    expect(read(path), path).not.toMatch(/import\s+(?!type\b)[^'"]*from\s+['"][^'"]*(?:\.\.\/)+src\//)
+  }
 })
 
 it('registers a recommendation page and navigates there from the home page', () => {

@@ -1,27 +1,17 @@
 "use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.sortNearbyFavorites = sortNearbyFavorites;
-exports.planFavoriteBatch = planFavoriteBatch;
-const geo_1 = require("./geo");
-function sortNearbyFavorites(places, center, radiusMeters) {
-    return places
-        .map(place => ({ place, distanceMeters: (0, geo_1.distanceMeters)(center, place.location) }))
-        .filter(item => item.distanceMeters <= radiusMeters)
-        .sort((a, b) => a.distanceMeters - b.distanceMeters || a.place.poiId.localeCompare(b.place.poiId));
-}
-function planFavoriteBatch(selected, existing) {
-    const seen = new Set();
-    const toCreate = [], duplicateSelections = [], existingIds = [];
-    for (const poiId of selected) {
-        if (seen.has(poiId)) {
-            duplicateSelections.push(poiId);
-            continue;
-        }
-        seen.add(poiId);
-        if (existing.has(poiId))
-            existingIds.push(poiId);
-        else
-            toCreate.push(poiId);
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
     }
-    return { toCreate, existing: existingIds, duplicateSelections };
-}
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __exportStar = (this && this.__exportStar) || function(m, exports) {
+    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+__exportStar(require("../../miniprogram/shared/favorites"), exports);

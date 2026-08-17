@@ -1,15 +1,17 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __exportStar = (this && this.__exportStar) || function(m, exports) {
+    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.distanceMeters = distanceMeters;
-const EARTH_RADIUS_METERS = 6_371_000;
-const radians = (degrees) => degrees * Math.PI / 180;
-function distanceMeters(from, to) {
-    if (from.latitude === to.latitude && from.longitude === to.longitude)
-        return 0;
-    const dLat = radians(to.latitude - from.latitude);
-    const dLon = radians(to.longitude - from.longitude);
-    const lat1 = radians(from.latitude);
-    const lat2 = radians(to.latitude);
-    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
-    return Math.round(EARTH_RADIUS_METERS * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
-}
+__exportStar(require("../../miniprogram/shared/geo"), exports);

@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AmapRoutesError = void 0;
 exports.createAmapRouteHttp = createAmapRouteHttp;
 exports.createAmapRoutesClient = createAmapRoutesClient;
+const https_json_1 = require("../shared/https-json");
 class AmapRoutesError extends Error {
     code;
     constructor(code, message) {
@@ -14,7 +15,7 @@ class AmapRoutesError extends Error {
 exports.AmapRoutesError = AmapRoutesError;
 const endpointByMode = {
     walking: '/v5/direction/walking',
-    bicycling: '/v5/direction/bicycling',
+    bicycling: '/v4/direction/bicycling',
     driving: '/v5/direction/driving',
 };
 function coordinate(point) {
@@ -28,16 +29,20 @@ function record(value) {
 function firstRecord(value) {
     return Array.isArray(value) ? record(value[0]) : undefined;
 }
-function durationSeconds(response) {
+function durationSeconds(response, mode) {
     const body = record(response);
-    if (body?.status !== '1')
+    if (mode === 'bicycling' && body?.errcode !== 0 && body?.errcode !== '0')
         return undefined;
-    const path = firstRecord(record(body.route)?.paths);
-    const raw = record(path?.cost)?.duration;
+    if (mode !== 'bicycling' && body?.status !== '1')
+        return undefined;
+    const path = mode === 'bicycling'
+        ? firstRecord(record(body?.data)?.paths)
+        : firstRecord(record(body?.route)?.paths);
+    const raw = mode === 'bicycling' ? path?.duration : record(path?.cost)?.duration;
     const duration = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() ? Number(raw) : NaN;
     return Number.isFinite(duration) && duration >= 0 ? duration : undefined;
 }
-function createAmapRouteHttp(fetcher = fetch, now = Date.now) {
+function createAmapRouteHttp(fetcher = (0, https_json_1.createHttpsJsonFetch)(), now = Date.now) {
     return async (query) => {
         const remainingMs = query.deadlineMs - now();
         if (remainingMs <= 0)
@@ -49,8 +54,9 @@ function createAmapRouteHttp(fetcher = fetch, now = Date.now) {
                 key: query.key,
                 origin: query.origin,
                 destination: query.destination,
-                show_fields: 'cost',
             });
+            if (query.mode !== 'bicycling')
+                params.set('show_fields', 'cost');
             const response = await fetcher(`https://restapi.amap.com${endpointByMode[query.mode]}?${params}`, {
                 signal: controller.signal,
             });
@@ -69,8 +75,11 @@ function createAmapRouteHttp(fetcher = fetch, now = Date.now) {
     };
 }
 function validPoint(point) {
-    return Number.isFinite(point.latitude) && point.latitude >= -90 && point.latitude <= 90
-        && Number.isFinite(point.longitude) && point.longitude >= -180 && point.longitude <= 180;
+    if (typeof point !== 'object' || point === null || Array.isArray(point))
+        return false;
+    const candidate = point;
+    return Number.isFinite(candidate.latitude) && candidate.latitude >= -90 && candidate.latitude <= 90
+        && Number.isFinite(candidate.longitude) && candidate.longitude >= -180 && candidate.longitude <= 180;
 }
 function createAmapRoutesClient({ key = process.env.AMAP_WEB_KEY, http = createAmapRouteHttp(), limiter, requestTimeoutMs = 8_000, now = Date.now, }) {
     if (!key)
@@ -80,7 +89,9 @@ function createAmapRoutesClient({ key = process.env.AMAP_WEB_KEY, http = createA
     }
     return {
         async times(origin, destinations, mode) {
-            if (!validPoint(origin) || destinations.length > 20 || destinations.some(point => !validPoint(point))) {
+            if (!validPoint(origin) || !Array.isArray(destinations) || destinations.length > 20
+                || destinations.some(point => !validPoint(point))
+                || !['walking', 'bicycling', 'driving'].includes(mode)) {
                 throw new AmapRoutesError('AMAP_ROUTES_UNAVAILABLE', '路线时间暂时无法计算');
             }
             if (destinations.length === 0)
@@ -95,7 +106,7 @@ function createAmapRoutesClient({ key = process.env.AMAP_WEB_KEY, http = createA
                     mode,
                     deadlineMs,
                 });
-                const seconds = durationSeconds(response);
+                const seconds = durationSeconds(response, mode);
                 if (seconds === undefined)
                     throw new AmapRoutesError('AMAP_ROUTES_UNAVAILABLE', '路线时间暂时无法计算');
                 return Math.ceil(seconds / 60);

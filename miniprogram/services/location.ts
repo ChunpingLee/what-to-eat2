@@ -1,4 +1,4 @@
-import type { GeoPoint } from '../../src/shared/types'
+import type { GeoPoint } from '../shared/types'
 
 function toGeoPoint(location: { latitude: number; longitude: number }): GeoPoint {
   return { latitude: location.latitude, longitude: location.longitude }

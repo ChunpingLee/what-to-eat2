@@ -10,8 +10,8 @@ export interface AccountState {
 }
 
 export interface TransactionDocument {
-  get(): Promise<{ data: unknown[] }>
-  set(options: { data: Record<string, unknown> }): Promise<unknown>
+  get(): Promise<{ data: unknown }>
+  set(documentBody: Record<string, unknown>): Promise<unknown>
   remove(): Promise<unknown>
 }
 
@@ -31,13 +31,23 @@ export function accountDocumentId(openid: string) {
   return createHash('sha256').update(openid).digest('hex')
 }
 
+export function accountStateFromDocumentData(data: unknown): { status?: unknown } | undefined {
+  const first = Array.isArray(data) ? data[0] : data
+  if (typeof first !== 'object' || first === null || Array.isArray(first)) return undefined
+  const record = first as Record<string, unknown>
+  if (typeof record.data === 'object' && record.data !== null && !Array.isArray(record.data)) {
+    return record.data as { status?: unknown }
+  }
+  return record
+}
+
 export async function ensureAccountWritable(transaction: AccountTransaction, openid: string, updatedAt: string) {
   const id = accountDocumentId(openid)
   const document = transaction.collection('users').doc(id)
   const result = await document.get()
-  const state = result.data[0] as { status?: unknown } | undefined
+  const state = accountStateFromDocumentData(result.data)
   if (state?.status === 'deleting') throw new AccountDeletingError()
   if (!state) {
-    await document.set({ data: { _id: id, _openid: openid, status: 'active', updatedAt } })
+    await document.set({ _id: id, _openid: openid, status: 'active', updatedAt })
   }
 }
