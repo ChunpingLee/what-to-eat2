@@ -1,0 +1,6 @@
+{
+  "usingComponents": {
+    "branch-picker": "/components/branch-picker/index"
+  },
+  "navigationBarTitleText": "添加想吃"
+}

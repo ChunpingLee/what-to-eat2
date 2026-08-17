@@ -32,3 +32,4 @@ declare const wx: {
 
 declare function App<T>(options: T): void
 declare function Page<T>(options: Omit<T, 'setData'>): void
+declare function Component<T>(options: unknown): void

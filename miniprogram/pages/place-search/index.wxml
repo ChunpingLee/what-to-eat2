@@ -1,0 +1,14 @@
+<view class="page">
+  <view class="title">加入想吃</view>
+  <view class="hint">搜索同名餐厅后，可一次加入多个分店。</view>
+  <input class="input" placeholder="餐厅名称，例如：海底捞" value="{{keywords}}" bindinput="onKeywordInput" />
+  <input class="input" placeholder="城市，例如：上海" value="{{city}}" bindinput="onCityInput" />
+  <button class="primary" loading="{{status === 'searching'}}" bindtap="onSearch">搜索附近分店</button>
+
+  <view wx:if="{{status === 'error'}}" class="error">{{errorMessage}}</view>
+  <view wx:if="{{status === 'empty'}}" class="hint">没有找到附近分店。</view>
+  <view wx:if="{{stale}}" class="hint">正在显示稍早的搜索结果。</view>
+
+  <branch-picker wx:if="{{branches.length}}" items="{{branches}}" selected-poi-ids="{{selectedPoiIds}}" bind:change="onSelectionChange" />
+  <button wx:if="{{branches.length}}" class="primary" disabled="{{selectedPoiIds.length === 0 || submitting}}" loading="{{submitting}}" bindtap="onAddSelected">加入已选分店（{{selectedPoiIds.length}}）</button>
+</view>

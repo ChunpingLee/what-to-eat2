@@ -1,0 +1,7 @@
+.branch { width: 100%; margin: 16rpx 0; padding: 24rpx; text-align: left; background: #fff; border-radius: 12rpx; }
+.branch-main { display: flex; justify-content: space-between; }
+.branch-name { font-weight: 600; }
+.branch-address, .branch-area, .branch-distance { display: block; margin-top: 8rpx; color: #666; font-size: 26rpx; }
+.added, .selected { color: #07c160; font-size: 26rpx; }
+.disabled { color: #888; background: #f4f4f4; }
+.branch-failed { margin-top: 8rpx; color: #d93025; font-size: 26rpx; }

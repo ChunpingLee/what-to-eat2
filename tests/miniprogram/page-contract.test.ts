@@ -37,3 +37,11 @@ it('uses a direct stable POI key for favorite cards', () => {
 it('renders an empty address safely when a place has no address', () => {
   expect(read('miniprogram/pages/home/index.wxml')).toContain("{{item.place.address || ''}}")
 })
+
+it('registers the branch search page and exposes it from the home page', () => {
+  const appConfig = JSON.parse(read('miniprogram/app.json')) as { pages: string[] }
+
+  expect(appConfig.pages).toContain('pages/place-search/index')
+  expect(read('miniprogram/pages/home/index.wxml')).toContain('url="/pages/place-search/index"')
+  expect(read('miniprogram/pages/place-search/index.wxml')).toContain('branch-picker')
+})

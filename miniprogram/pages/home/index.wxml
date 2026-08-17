@@ -28,6 +28,9 @@
     <navigator wx:if="{{showRecommend}}" url="/pages/recommend/index" class="recommend-link">
       <button class="recommend-button">换成附近推荐</button>
     </navigator>
+    <navigator url="/pages/place-search/index" class="recommend-link">
+      <button class="recommend-button">加入想吃 / 搜索分店</button>
+    </navigator>
     <button class="secondary" bindtap="onManualLocation">手动选择地点</button>
   </view>
 </view>
