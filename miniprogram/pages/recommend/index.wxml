@@ -34,8 +34,8 @@
     <input class="input" type="number" placeholder="例如：30" value="{{maxMinutes}}" bindinput="onMaxMinutesInput" />
   </view>
 
-  <button class="primary" loading="{{status === 'loading'}}" bindtap="onRecommend">用当前位置推荐</button>
-  <button class="secondary" bindtap="onManualLocation">手动选择地点</button>
+  <button class="primary" loading="{{status === 'loading'}}" disabled="{{status === 'loading'}}" bindtap="onRecommend">用当前位置推荐</button>
+  <button class="secondary" disabled="{{status === 'loading'}}" bindtap="onManualLocation">手动选择地点</button>
 
   <view wx:if="{{status === 'locationRequired'}}" class="notice">无法使用当前位置。你可以手动选择本次查询地点。</view>
   <view wx:if="{{status === 'error'}}" class="error">{{errorMessage}}</view>

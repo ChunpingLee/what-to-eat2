@@ -1,6 +1,7 @@
 import type { Place } from './favorites'
 import { recommendationReasons, type RecommendationSignal } from './recommendation-reasons'
 import type { GeoPoint, TravelMode } from '../shared/types'
+import { findRestaurantCategory, restaurantCategoryAliases } from './restaurant-categories'
 
 export interface RecommendationRequest {
   category?: string
@@ -51,7 +52,10 @@ function preferenceSignal(candidate: RecommendationCandidate, request: Recommend
   const searchable = [...presentStrings(candidate.place.categories), ...presentStrings(candidate.place.tags), normalized(candidate.place.name)]
   if (searchable.length === 0) return undefined
   const joined = searchable.join(' ')
-  const categoryScore = category === undefined ? undefined : searchable.includes(category) ? 1 : joined.includes(category) ? 0.8 : 0
+  const categoryDefinition = findRestaurantCategory(request.category)
+  const categoryAliases = restaurantCategoryAliases(request.category).map(normalized)
+  const categoryScore = category === undefined ? undefined : Math.max(0, ...categoryAliases.map(alias =>
+    searchable.includes(alias) ? 1 : joined.includes(alias) ? 0.8 : 0))
   const keywordMatches = keywords.map(keyword => ({ keyword, exact: searchable.includes(keyword), substring: joined.includes(keyword) }))
   const keywordScore = keywords.length === 0 ? undefined
     : keywordMatches.every(match => match.exact) ? 1
@@ -59,7 +63,7 @@ function preferenceSignal(candidate: RecommendationCandidate, request: Recommend
         : keywordMatches.filter(match => match.substring).length / keywordMatches.length * 0.8
   const rawScore = Math.max(categoryScore ?? 0, keywordScore ?? 0)
   const actual = categoryScore !== undefined && categoryScore >= (keywordScore ?? 0)
-    ? request.category as string
+    ? categoryDefinition?.label ?? request.category as string
     : request.keywords as string
   return { key: 'preference', rawScore, weight: WEIGHTS.preference, actual }
 }

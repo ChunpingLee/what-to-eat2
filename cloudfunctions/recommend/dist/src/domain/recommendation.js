@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.rankRecommendations = rankRecommendations;
 const recommendation_reasons_1 = require("./recommendation-reasons");
+const restaurant_categories_1 = require("./restaurant-categories");
 const WEIGHTS = {
     preference: 35,
     proximity: 30,
@@ -26,7 +27,9 @@ function preferenceSignal(candidate, request) {
     if (searchable.length === 0)
         return undefined;
     const joined = searchable.join(' ');
-    const categoryScore = category === undefined ? undefined : searchable.includes(category) ? 1 : joined.includes(category) ? 0.8 : 0;
+    const categoryDefinition = (0, restaurant_categories_1.findRestaurantCategory)(request.category);
+    const categoryAliases = (0, restaurant_categories_1.restaurantCategoryAliases)(request.category).map(normalized);
+    const categoryScore = category === undefined ? undefined : Math.max(0, ...categoryAliases.map(alias => searchable.includes(alias) ? 1 : joined.includes(alias) ? 0.8 : 0));
     const keywordMatches = keywords.map(keyword => ({ keyword, exact: searchable.includes(keyword), substring: joined.includes(keyword) }));
     const keywordScore = keywords.length === 0 ? undefined
         : keywordMatches.every(match => match.exact) ? 1
@@ -34,7 +37,7 @@ function preferenceSignal(candidate, request) {
                 : keywordMatches.filter(match => match.substring).length / keywordMatches.length * 0.8;
     const rawScore = Math.max(categoryScore ?? 0, keywordScore ?? 0);
     const actual = categoryScore !== undefined && categoryScore >= (keywordScore ?? 0)
-        ? request.category
+        ? categoryDefinition?.label ?? request.category
         : request.keywords;
     return { key: 'preference', rawScore, weight: WEIGHTS.preference, actual };
 }

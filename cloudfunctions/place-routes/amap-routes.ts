@@ -1,4 +1,5 @@
 import type { GeoPoint, TravelMode } from '../../src/shared/types'
+import type { RouteRateLimiter } from './rate-limiter'
 
 export interface RouteTimesClient {
   times(origin: GeoPoint, destinations: GeoPoint[], mode: TravelMode): Promise<Array<number | undefined>>
@@ -9,6 +10,7 @@ export interface AmapRouteHttpQuery {
   origin: string
   destination: string
   mode: TravelMode
+  deadlineMs: number
 }
 
 export type AmapRouteHttp = (query: AmapRouteHttpQuery) => Promise<unknown>
@@ -54,10 +56,12 @@ function durationSeconds(response: unknown): number | undefined {
   return Number.isFinite(duration) && duration >= 0 ? duration : undefined
 }
 
-export function createAmapRouteHttp(fetcher: FetchLike = fetch): AmapRouteHttp {
+export function createAmapRouteHttp(fetcher: FetchLike = fetch, now: () => number = Date.now): AmapRouteHttp {
   return async query => {
+    const remainingMs = query.deadlineMs - now()
+    if (remainingMs <= 0) throw new AmapRoutesError('AMAP_ROUTES_UNAVAILABLE', '路线时间暂时无法计算')
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 8_000)
+    const timer = setTimeout(() => controller.abort(), Math.min(8_000, remainingMs))
     try {
       const params = new URLSearchParams({
         key: query.key,
@@ -87,20 +91,35 @@ function validPoint(point: GeoPoint): boolean {
 export function createAmapRoutesClient({
   key = process.env.AMAP_WEB_KEY,
   http = createAmapRouteHttp(),
-}: { key?: string; http?: AmapRouteHttp } = {}): RouteTimesClient {
+  limiter,
+  requestTimeoutMs = 8_000,
+  now = Date.now,
+}: {
+  key?: string
+  http?: AmapRouteHttp
+  limiter: RouteRateLimiter
+  requestTimeoutMs?: number
+  now?: () => number
+}): RouteTimesClient {
   if (!key) throw new AmapRoutesError('AMAP_ROUTES_NOT_CONFIGURED', '路线服务未配置')
+  if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs <= 0) {
+    throw new AmapRoutesError('AMAP_ROUTES_UNAVAILABLE', '路线时间暂时无法计算')
+  }
   return {
     async times(origin, destinations, mode) {
       if (!validPoint(origin) || destinations.length > 20 || destinations.some(point => !validPoint(point))) {
         throw new AmapRoutesError('AMAP_ROUTES_UNAVAILABLE', '路线时间暂时无法计算')
       }
       if (destinations.length === 0) return []
+      const deadlineMs = now() + requestTimeoutMs
       const settled = await Promise.allSettled(destinations.map(async destination => {
+        await limiter.acquire({ key, service: mode, deadlineMs })
         const response = await http({
           key,
           origin: coordinate(origin),
           destination: coordinate(destination),
           mode,
+          deadlineMs,
         })
         const seconds = durationSeconds(response)
         if (seconds === undefined) throw new AmapRoutesError('AMAP_ROUTES_UNAVAILABLE', '路线时间暂时无法计算')

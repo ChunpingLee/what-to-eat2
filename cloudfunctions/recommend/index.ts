@@ -1,5 +1,6 @@
 import type { Place } from '../../src/domain/favorites'
 import { distanceMeters } from '../../src/domain/geo'
+import { findRestaurantCategory, restaurantCategoryAliases } from '../../src/domain/restaurant-categories'
 import {
   rankRecommendations,
   type RankedPlace,
@@ -14,6 +15,10 @@ import {
   type PlaceSearchResult,
 } from '../place-search/cache'
 import { createAmapRoutesClient, type RouteTimesClient } from '../place-routes/amap-routes'
+import {
+  createCloudBaseRouteRateLimiter,
+  type CloudBaseRouteRateLimitDatabase,
+} from '../place-routes/rate-limiter'
 
 export type { RouteTimesClient } from '../place-routes/amap-routes'
 
@@ -81,7 +86,9 @@ function matchesPreference(place: Place, request: RecommendationRequest): boolea
   const joined = values.join(' ')
   const category = normalized(text(request.category))
   const keywords = text(request.keywords).split(/[\s,，、/]+/).map(normalized).filter(Boolean)
-  const categoryMatch = category ? joined.includes(category) : false
+  const categoryMatch = category
+    ? restaurantCategoryAliases(request.category).some(alias => joined.includes(normalized(alias)))
+    : false
   const keywordsMatch = keywords.length ? keywords.every(keyword => joined.includes(keyword)) : false
   return categoryMatch || keywordsMatch
 }
@@ -93,15 +100,10 @@ function matchesBudget(place: Place, budget: RecommendationRequest['budget']): b
     && (budget.max === undefined || place.averageCost <= budget.max)
 }
 
-function reliablyClosed(status: string | undefined): boolean {
-  if (!status) return false
-  const value = normalized(status).replace(/\s+/g, '')
-  return ['0', 'closed', '闭店', '已关闭', '停业', '歇业', '暂停营业'].includes(value)
-}
-
 function searchKeywords(request: RecommendationRequest): string {
   if (request.random) return '餐饮服务'
-  return text(request.keywords) || text(request.category)
+  if (text(request.keywords)) return text(request.keywords)
+  return findRestaurantCategory(request.category)?.searchKeyword ?? text(request.category)
 }
 
 function withRouteTimes(
@@ -135,8 +137,7 @@ export function createRecommendHandler(deps: {
       .map(place => ({ place, distanceMeters: distanceMeters(request.center, place.location) }))
       .filter(candidate => candidate.distanceMeters <= request.radiusMeters
         && matchesPreference(candidate.place, request)
-        && matchesBudget(candidate.place, request.budget)
-        && !reliablyClosed(candidate.place.businessStatus))
+        && matchesBudget(candidate.place, request.budget))
 
     const preRanked = rankRecommendations(candidates, request).slice(0, 20)
     const routeCandidates: RecommendationCandidate[] = preRanked.map(item => ({
@@ -170,7 +171,7 @@ export function createRecommendHandler(deps: {
 }
 
 export function createLazyRouteTimesClient(
-  createClient: () => RouteTimesClient = () => createAmapRoutesClient(),
+  createClient: () => RouteTimesClient,
 ): RouteTimesClient {
   return {
     times(origin, destinations, mode) {
@@ -181,7 +182,7 @@ export function createLazyRouteTimesClient(
 
 interface CloudBaseSdk {
   SYMBOL_CURRENT_ENV: unknown
-  init(options: { env: unknown }): { database(): CloudBaseCacheDatabase }
+  init(options: { env: unknown }): { database(): CloudBaseCacheDatabase & CloudBaseRouteRateLimitDatabase }
 }
 
 export function main(
@@ -190,12 +191,15 @@ export function main(
   sdk: CloudBaseSdk = require('@cloudbase/node-sdk') as CloudBaseSdk,
 ) {
   const app = sdk.init({ env: sdk.SYMBOL_CURRENT_ENV })
+  const database = app.database()
   const searchService = createPlaceSearchService({
     client: createAmapClient(),
-    cache: createCloudBaseSearchCache(app.database()),
+    cache: createCloudBaseSearchCache(database),
   })
   return createRecommendHandler({
     searchClient: { search: query => searchService.searchPlaces(query) },
-    routeClient: createLazyRouteTimesClient(),
+    routeClient: createLazyRouteTimesClient(() => createAmapRoutesClient({
+      limiter: createCloudBaseRouteRateLimiter(database),
+    })),
   })(event)
 }

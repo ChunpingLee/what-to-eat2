@@ -13,6 +13,7 @@
   "include": [
     "index.ts",
     "amap-routes.ts",
+    "rate-limiter.ts",
     "../../src/shared/types.ts"
   ]
 }

@@ -5,10 +5,12 @@ exports.createRecommendHandler = createRecommendHandler;
 exports.createLazyRouteTimesClient = createLazyRouteTimesClient;
 exports.main = main;
 const geo_1 = require("../../src/domain/geo");
+const restaurant_categories_1 = require("../../src/domain/restaurant-categories");
 const recommendation_1 = require("../../src/domain/recommendation");
 const amap_client_1 = require("../place-search/amap-client");
 const cache_1 = require("../place-search/cache");
 const amap_routes_1 = require("../place-routes/amap-routes");
+const rate_limiter_1 = require("../place-routes/rate-limiter");
 class RecommendationRequestError extends Error {
     code = 'INVALID_RECOMMENDATION_REQUEST';
     constructor() {
@@ -57,7 +59,9 @@ function matchesPreference(place, request) {
     const joined = values.join(' ');
     const category = normalized(text(request.category));
     const keywords = text(request.keywords).split(/[\s,，、/]+/).map(normalized).filter(Boolean);
-    const categoryMatch = category ? joined.includes(category) : false;
+    const categoryMatch = category
+        ? (0, restaurant_categories_1.restaurantCategoryAliases)(request.category).some(alias => joined.includes(normalized(alias)))
+        : false;
     const keywordsMatch = keywords.length ? keywords.every(keyword => joined.includes(keyword)) : false;
     return categoryMatch || keywordsMatch;
 }
@@ -69,16 +73,12 @@ function matchesBudget(place, budget) {
     return (budget.min === undefined || place.averageCost >= budget.min)
         && (budget.max === undefined || place.averageCost <= budget.max);
 }
-function reliablyClosed(status) {
-    if (!status)
-        return false;
-    const value = normalized(status).replace(/\s+/g, '');
-    return ['0', 'closed', '闭店', '已关闭', '停业', '歇业', '暂停营业'].includes(value);
-}
 function searchKeywords(request) {
     if (request.random)
         return '餐饮服务';
-    return text(request.keywords) || text(request.category);
+    if (text(request.keywords))
+        return text(request.keywords);
+    return (0, restaurant_categories_1.findRestaurantCategory)(request.category)?.searchKeyword ?? text(request.category);
 }
 function withRouteTimes(candidates, times, maxMinutes) {
     return candidates.flatMap((candidate, index) => {
@@ -104,8 +104,7 @@ function createRecommendHandler(deps) {
             .map(place => ({ place, distanceMeters: (0, geo_1.distanceMeters)(request.center, place.location) }))
             .filter(candidate => candidate.distanceMeters <= request.radiusMeters
             && matchesPreference(candidate.place, request)
-            && matchesBudget(candidate.place, request.budget)
-            && !reliablyClosed(candidate.place.businessStatus));
+            && matchesBudget(candidate.place, request.budget));
         const preRanked = (0, recommendation_1.rankRecommendations)(candidates, request).slice(0, 20);
         const routeCandidates = preRanked.map(item => ({
             place: item.place,
@@ -132,7 +131,7 @@ function createRecommendHandler(deps) {
         };
     };
 }
-function createLazyRouteTimesClient(createClient = () => (0, amap_routes_1.createAmapRoutesClient)()) {
+function createLazyRouteTimesClient(createClient) {
     return {
         times(origin, destinations, mode) {
             return Promise.resolve().then(() => createClient()).then(client => client.times(origin, destinations, mode));
@@ -141,12 +140,15 @@ function createLazyRouteTimesClient(createClient = () => (0, amap_routes_1.creat
 }
 function main(event, _context, sdk = require('@cloudbase/node-sdk')) {
     const app = sdk.init({ env: sdk.SYMBOL_CURRENT_ENV });
+    const database = app.database();
     const searchService = (0, cache_1.createPlaceSearchService)({
         client: (0, amap_client_1.createAmapClient)(),
-        cache: (0, cache_1.createCloudBaseSearchCache)(app.database()),
+        cache: (0, cache_1.createCloudBaseSearchCache)(database),
     });
     return createRecommendHandler({
         searchClient: { search: query => searchService.searchPlaces(query) },
-        routeClient: createLazyRouteTimesClient(),
+        routeClient: createLazyRouteTimesClient(() => (0, amap_routes_1.createAmapRoutesClient)({
+            limiter: (0, rate_limiter_1.createCloudBaseRouteRateLimiter)(database),
+        })),
     })(event);
 }

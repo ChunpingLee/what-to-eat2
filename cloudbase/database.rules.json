@@ -24,6 +24,11 @@
       "name": "users",
       "aclTag": "CUSTOM",
       "rule": { "read": "doc._openid == auth.openid", "write": false }
+    },
+    {
+      "name": "amap_route_rate_limits",
+      "aclTag": "CUSTOM",
+      "rule": { "read": false, "write": false }
     }
   ]
 }

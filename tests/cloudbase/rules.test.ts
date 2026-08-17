@@ -15,6 +15,10 @@ it('defines per-collection deployable rules that deny direct writes to private d
     })
   }
   expect(byName.get('places')).toMatchObject({ aclTag: 'CUSTOM', rule: { read: true, write: false } })
+  expect(byName.get('amap_route_rate_limits')).toMatchObject({
+    aclTag: 'CUSTOM',
+    rule: { read: false, write: false },
+  })
 })
 
 it('exposes the rule manifest through an executable deployment command', () => {

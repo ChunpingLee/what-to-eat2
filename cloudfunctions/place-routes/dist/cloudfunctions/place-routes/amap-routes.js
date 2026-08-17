@@ -37,10 +37,13 @@ function durationSeconds(response) {
     const duration = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() ? Number(raw) : NaN;
     return Number.isFinite(duration) && duration >= 0 ? duration : undefined;
 }
-function createAmapRouteHttp(fetcher = fetch) {
+function createAmapRouteHttp(fetcher = fetch, now = Date.now) {
     return async (query) => {
+        const remainingMs = query.deadlineMs - now();
+        if (remainingMs <= 0)
+            throw new AmapRoutesError('AMAP_ROUTES_UNAVAILABLE', '路线时间暂时无法计算');
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 8_000);
+        const timer = setTimeout(() => controller.abort(), Math.min(8_000, remainingMs));
         try {
             const params = new URLSearchParams({
                 key: query.key,
@@ -69,9 +72,12 @@ function validPoint(point) {
     return Number.isFinite(point.latitude) && point.latitude >= -90 && point.latitude <= 90
         && Number.isFinite(point.longitude) && point.longitude >= -180 && point.longitude <= 180;
 }
-function createAmapRoutesClient({ key = process.env.AMAP_WEB_KEY, http = createAmapRouteHttp(), } = {}) {
+function createAmapRoutesClient({ key = process.env.AMAP_WEB_KEY, http = createAmapRouteHttp(), limiter, requestTimeoutMs = 8_000, now = Date.now, }) {
     if (!key)
         throw new AmapRoutesError('AMAP_ROUTES_NOT_CONFIGURED', '路线服务未配置');
+    if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs <= 0) {
+        throw new AmapRoutesError('AMAP_ROUTES_UNAVAILABLE', '路线时间暂时无法计算');
+    }
     return {
         async times(origin, destinations, mode) {
             if (!validPoint(origin) || destinations.length > 20 || destinations.some(point => !validPoint(point))) {
@@ -79,12 +85,15 @@ function createAmapRoutesClient({ key = process.env.AMAP_WEB_KEY, http = createA
             }
             if (destinations.length === 0)
                 return [];
+            const deadlineMs = now() + requestTimeoutMs;
             const settled = await Promise.allSettled(destinations.map(async (destination) => {
+                await limiter.acquire({ key, service: mode, deadlineMs });
                 const response = await http({
                     key,
                     origin: coordinate(origin),
                     destination: coordinate(destination),
                     mode,
+                    deadlineMs,
                 });
                 const seconds = durationSeconds(response);
                 if (seconds === undefined)

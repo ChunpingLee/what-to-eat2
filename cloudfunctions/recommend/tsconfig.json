@@ -13,12 +13,14 @@
   "include": [
     "index.ts",
     "../place-routes/amap-routes.ts",
+    "../place-routes/rate-limiter.ts",
     "../place-search/amap-client.ts",
     "../place-search/cache.ts",
     "../../src/domain/favorites.ts",
     "../../src/domain/geo.ts",
     "../../src/domain/recommendation.ts",
     "../../src/domain/recommendation-reasons.ts",
+    "../../src/domain/restaurant-categories.ts",
     "../../src/shared/errors.ts",
     "../../src/shared/types.ts"
   ]

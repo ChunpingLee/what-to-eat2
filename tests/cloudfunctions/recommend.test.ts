@@ -14,7 +14,11 @@ import { createAmapClient, createAmapHttp } from '../../cloudfunctions/place-sea
 import {
   buildRecommendationInput,
   createRecommendationController,
+  createRecommendationSubmitter,
 } from '../../miniprogram/pages/recommend/index'
+import { FIXED_RESTAURANT_CATEGORIES } from '../../src/domain/restaurant-categories'
+
+const unlimitedLimiter = { acquire: vi.fn().mockResolvedValue(undefined) }
 
 const center = { latitude: 31.23, longitude: 121.47 }
 const request: RecommendationRequest = {
@@ -58,14 +62,13 @@ describe('recommend cloud function', () => {
     )
   })
 
-  it('hard-filters radius, preference, budget and reliably closed places before routing', async () => {
+  it('hard-filters radius, preference and budget before routing', async () => {
     const inRange = place(1)
     const deps = dependencies([
       inRange,
       place(2, { categories: ['餐饮服务', '烧烤'], name: '烧烤店' }),
       place(3, { averageCost: 121 }),
       place(4, { averageCost: undefined }),
-      place(5, { businessStatus: '暂停营业' }),
       place(6, { location: { latitude: 32, longitude: 121.47 } }),
     ], [10])
 
@@ -73,6 +76,30 @@ describe('recommend cloud function', () => {
 
     expect(result.items.map(item => item.place.poiId)).toEqual([inRange.poiId])
     expect(deps.routeClient.times).toHaveBeenCalledWith(center, [inRange.location], 'walking')
+  })
+
+  it('does not filter on undocumented or unprovenanced business status values', async () => {
+    const deps = dependencies([
+      place(1, { businessStatus: '暂停营业' }),
+      place(2, { businessStatus: '0' }),
+      place(3, { businessStatus: undefined }),
+    ], [10, 10, 10])
+
+    const result = await createRecommendHandler(deps)(request)
+
+    expect(result.items.map(item => item.place.poiId)).toEqual(['p01', 'p02', 'p03'])
+  })
+
+  it.each(FIXED_RESTAURANT_CATEGORIES)('uses shared aliases and search keyword for $label', async category => {
+    const alias = category.aliases.find(value => value !== category.label) ?? category.aliases[0]
+    const candidate = place(1, { name: `${alias}示例店`, categories: ['餐饮服务', alias], tags: [] })
+    const deps = dependencies([candidate], [10])
+
+    const result = await createRecommendHandler(deps)({ ...request, category: category.id })
+
+    expect(result.items.map(item => item.place.poiId)).toEqual(['p01'])
+    expect(deps.searchClient.search).toHaveBeenCalledWith(expect.objectContaining({ keywords: category.searchKeyword }))
+    expect(result.items[0].reasons.join('')).toContain(category.label)
   })
 
   it('applies max minutes only to successful route times and keeps partial failures as unavailable', async () => {
@@ -159,7 +186,7 @@ describe('Amap route client', () => {
     const fetcher = vi.fn().mockImplementation(async (input: string) => {
       return { ok: true, json: async () => ({ status: '1', route: { paths: [{ cost: { duration: '601' } }] } }) }
     })
-    const client = createAmapRoutesClient({ key: 'server-only', http: createAmapRouteHttp(fetcher as never) })
+    const client = createAmapRoutesClient({ key: 'server-only', http: createAmapRouteHttp(fetcher as never), limiter: unlimitedLimiter })
 
     await expect(client.times(center, [place(1).location], 'walking')).resolves.toEqual([11])
     await expect(client.times(center, [place(1).location], 'bicycling')).resolves.toEqual([11])
@@ -182,7 +209,7 @@ describe('Amap route client', () => {
       .mockResolvedValueOnce({ status: '1', route: { paths: [{ cost: { duration: '60' } }] } })
       .mockRejectedValueOnce(new Error('timeout'))
       .mockResolvedValueOnce({ status: '1', route: { paths: [{ cost: { duration: '120' } }] } })
-    const client = createAmapRoutesClient({ key: 'server-only', http })
+    const client = createAmapRoutesClient({ key: 'server-only', http, limiter: unlimitedLimiter })
 
     await expect(client.times(center, [place(1).location, place(2).location, place(3).location], 'walking'))
       .resolves.toEqual([1, undefined, 2])
@@ -192,6 +219,7 @@ describe('Amap route client', () => {
     const client = createAmapRoutesClient({
       key: 'server-only',
       http: vi.fn().mockResolvedValue({ status: '0', info: 'INVALID_USER_KEY', infocode: '10001' }),
+      limiter: unlimitedLimiter,
     })
 
     await expect(client.times(center, [place(1).location], 'walking')).rejects.toMatchObject({
@@ -255,6 +283,8 @@ describe('recommendation page contract', () => {
     expect(page).toContain('bindtap="onManualLocation"')
     expect(page).toContain('wx:key="poiId"')
     expect(script).toContain('chooseManualLocation')
+    expect(script).toContain('FIXED_RESTAURANT_CATEGORIES')
+    expect(page).toContain('disabled="{{status === \'loading\'}}"')
     expect(cloud).toContain("name: 'recommend'")
   })
 
@@ -327,5 +357,22 @@ describe('recommendation page controller', () => {
       category: '火锅', random: false, budget: { min: undefined, max: 120 },
       maxMinutes: 30, radiusMeters: 5_000, travelMode: 'walking',
     })
+  })
+
+  it('allows only one cloud invocation while a submit is pending', async () => {
+    let finish!: () => void
+    const pending = new Promise<void>(resolve => { finish = resolve })
+    const callCloud = vi.fn().mockReturnValue(pending)
+    const submitter = createRecommendationSubmitter()
+
+    const first = submitter.run(callCloud)
+    const duplicate = submitter.run(callCloud)
+
+    expect(callCloud).toHaveBeenCalledOnce()
+    await expect(duplicate).resolves.toBeUndefined()
+    finish()
+    await first
+    await submitter.run(callCloud)
+    expect(callCloud).toHaveBeenCalledTimes(2)
   })
 })

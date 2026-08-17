@@ -1,6 +1,7 @@
 import type { RecommendationRequest } from '../../../src/domain/recommendation'
 import type { GeoPoint, TravelMode } from '../../../src/shared/types'
 import type { RecommendationItem, RecommendationResult } from '../../../cloudfunctions/recommend/index'
+import { FIXED_RESTAURANT_CATEGORIES } from '../../../src/domain/restaurant-categories'
 import { addFavoriteBatch, recommendPlaces } from '../../services/cloud'
 import { chooseManualLocation, getCurrentLocation } from '../../services/location'
 
@@ -55,7 +56,6 @@ interface RecommendationPage {
   onOpenLocation(event: DatasetEvent): void
 }
 
-const categoryValues = ['火锅', '烧烤', '川菜', '日料', '咖啡']
 const radiusValues = [1_000, 3_000, 5_000, 10_000]
 const travelValues: Array<{ label: string; value: TravelMode }> = [
   { label: '步行', value: 'walking' },
@@ -78,7 +78,11 @@ function options<T>(values: Array<{ label: string; value: T }>, selected: T): Ar
 }
 
 function categoryOptions(selected: string, enabled = true) {
-  return categoryValues.map(value => ({ label: value, value, selected: enabled && value === selected }))
+  return FIXED_RESTAURANT_CATEGORIES.map(category => ({
+    label: category.label,
+    value: category.id,
+    selected: enabled && category.id === selected,
+  }))
 }
 
 function radiusOptions(selected: number) {
@@ -152,17 +156,34 @@ export function createRecommendationController(deps: {
 
 const controller = createRecommendationController({ recommendPlaces })
 
+export function createRecommendationSubmitter() {
+  let pending = false
+  return {
+    async run<T>(operation: () => Promise<T>): Promise<T | undefined> {
+      if (pending) return undefined
+      pending = true
+      try {
+        return await operation()
+      } finally {
+        pending = false
+      }
+    },
+  }
+}
+
+const submitter = createRecommendationSubmitter()
+
 const initialData: RecommendationData = {
   status: 'idle',
   preferenceMode: 'category',
-  category: '火锅',
+  category: 'hotpot',
   keywords: '',
   budgetMin: '',
   budgetMax: '',
   maxMinutes: '30',
   radiusMeters: 5_000,
   travelMode: 'walking',
-  categoryOptions: categoryOptions('火锅'),
+  categoryOptions: categoryOptions('hotpot'),
   radiusOptions: radiusOptions(5_000),
   travelOptions: travelOptions('walking'),
   items: [],
@@ -228,6 +249,7 @@ if (typeof Page === 'function') {
     },
 
     beginRecommendation(this: RecommendationPage, locate: typeof getCurrentLocation) {
+      if (this.data.status === 'loading') return
       const intent = controller.beginIntent()
       const input = buildRecommendationInput(this.data)
       if (input.random === false && !input.category && !input.keywords) {
@@ -235,7 +257,7 @@ if (typeof Page === 'function') {
         return
       }
       this.setData({ status: 'loading', items: [], stale: false, errorMessage: '' })
-      void this.runRecommendation(intent, input, locate)
+      void submitter.run(() => this.runRecommendation(intent, input, locate))
     },
 
     async runRecommendation(
