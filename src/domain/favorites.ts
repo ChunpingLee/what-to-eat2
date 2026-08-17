@@ -2,6 +2,8 @@ import { distanceMeters } from './geo'
 import type { GeoPoint } from '../shared/types'
 
 export interface Place { poiId: string; name: string; location: GeoPoint; address: string; businessArea?: string; categories: string[] }
+export type FavoriteSource = 'search' | 'link' | 'recommendation' | 'share'
+export interface Favorite { poiId: string; note?: string; source: FavoriteSource; createdAt: string }
 export interface NearbyFavorite { place: Place; distanceMeters: number }
 
 export function sortNearbyFavorites(places: Place[], center: GeoPoint, radiusMeters: number): NearbyFavorite[] {
