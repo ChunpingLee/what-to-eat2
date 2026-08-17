@@ -1,8 +1,7 @@
-import type { NearbyFavorite } from '../../../src/domain/favorites'
 import type { GeoPoint } from '../../../src/shared/types'
 import { listFavorites } from '../../services/cloud'
 import { chooseManualLocation, getCurrentLocation } from '../../services/location'
-import { createHomeController } from './controller'
+import { createHomeController, type HomeFavorite } from './controller'
 
 const controller = createHomeController({ listFavorites })
 const radiusOptions = [1, 3, 5, 10] as const
@@ -14,7 +13,7 @@ interface HomeData {
   center?: GeoPoint
   radiusMeters: number
   radiusOptions: readonly number[]
-  items: NearbyFavorite[]
+  items: HomeFavorite[]
   showRecommend: boolean
   errorMessage: string
 }
@@ -32,7 +31,6 @@ interface HomePage {
   onRadiusChange(event: RadiusEvent): void
   onManualLocation(): void
   onRetry(): void
-  onRecommend(): void
 }
 
 Page<HomePage>({
@@ -87,7 +85,4 @@ Page<HomePage>({
     else void this.requestCurrentLocation()
   },
 
-  onRecommend() {
-    wx.showToast({ title: '附近推荐即将推出', icon: 'none' })
-  },
 })

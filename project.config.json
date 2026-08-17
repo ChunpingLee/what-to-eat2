@@ -1,0 +1,10 @@
+{
+  "description": "最想吃啥微信小程序",
+  "miniprogramRoot": "miniprogram/",
+  "compileType": "miniprogram",
+  "setting": {
+    "es6": true,
+    "enhance": true,
+    "minified": true
+  }
+}

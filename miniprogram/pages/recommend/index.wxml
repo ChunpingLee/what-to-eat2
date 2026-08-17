@@ -1,0 +1,4 @@
+<view class="page">
+  <view class="title">附近推荐</view>
+  <view class="hint">选择品类后，将为你展示附近合适的餐厅。</view>
+</view>

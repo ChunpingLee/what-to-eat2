@@ -24,9 +24,11 @@ declare const wx: {
   }): void
   showToast(options: { title: string; icon: 'none' }): void
   cloud: {
+    DYNAMIC_CURRENT_ENV: string
+    init(options: { env: string }): void
     callFunction<T>(options: { name: string; data: unknown }): Promise<WxCloudCallResult<T>>
   }
 }
 
-declare function App(options: Record<string, unknown>): void
+declare function App<T>(options: T): void
 declare function Page<T>(options: Omit<T, 'setData'>): void

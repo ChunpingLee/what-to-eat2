@@ -19,13 +19,15 @@
     </view>
     <view wx:if="{{status === 'empty'}}" class="hint">这个范围内还没有收藏。</view>
 
-    <view wx:for="{{items}}" wx:key="place.poiId" class="favorite-card">
+    <view wx:for="{{items}}" wx:key="poiId" class="favorite-card">
       <view class="name">{{item.place.name}}</view>
       <view class="address">{{item.place.address}}</view>
       <view class="distance">{{item.distanceMeters}} 米</view>
     </view>
 
-    <button wx:if="{{showRecommend}}" class="recommend-button" bindtap="onRecommend">换成附近推荐</button>
+    <navigator wx:if="{{showRecommend}}" url="/pages/recommend/index" class="recommend-link">
+      <button class="recommend-button">换成附近推荐</button>
+    </navigator>
     <button class="secondary" bindtap="onManualLocation">手动选择地点</button>
   </view>
 </view>

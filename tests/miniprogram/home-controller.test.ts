@@ -21,3 +21,15 @@ it('keeps the last successful items when refresh fails', async () => {
   await expect(controller.load({ latitude: 31.23, longitude: 121.47 }, 5_000))
     .resolves.toMatchObject({ status: 'error', items: [{ place: nearby }], showRecommend: true })
 })
+
+it('adds a direct POI id to every favorite card for stable rendering keys', async () => {
+  const api = {
+    listFavorites: vi.fn().mockResolvedValue([
+      { poiId: 'near', name: '近店', location: { latitude: 31.231, longitude: 121.47 }, address: '近路', categories: ['餐饮'] },
+    ]),
+  }
+  const controller = createHomeController(api)
+
+  await expect(controller.load({ latitude: 31.23, longitude: 121.47 }, 5_000))
+    .resolves.toMatchObject({ items: [{ poiId: 'near' }] })
+})
