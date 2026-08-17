@@ -10,10 +10,10 @@ const dianping_1 = require("./parsers/dianping");
 const meituan_1 = require("./parsers/meituan");
 const url_policy_1 = require("./url-policy");
 function parserFor(url) {
-    const hostname = (0, url_policy_1.parseAllowedUrl)(url).hostname;
-    if (hostname === 'meituan.com' || hostname.endsWith('.meituan.com'))
+    const platform = (0, url_policy_1.platformForUrl)(url);
+    if (platform === 'meituan')
         return meituan_1.parseMeituanPage;
-    if (hostname === 'dianping.com' || hostname.endsWith('.dianping.com'))
+    if (platform === 'dianping')
         return dianping_1.parseDianpingPage;
     return amap_1.parseAmapPage;
 }

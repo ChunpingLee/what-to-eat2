@@ -10,6 +10,7 @@ import {
   LinkImportError,
   fetchAllowedPage,
   parseAllowedUrl,
+  platformForUrl,
   unavailableLink,
   type FetchedPage,
 } from './url-policy'
@@ -25,9 +26,9 @@ export interface LinkImporterDependencies {
 }
 
 function parserFor(url: string): (html: string) => PlaceHint | undefined {
-  const hostname = parseAllowedUrl(url).hostname
-  if (hostname === 'meituan.com' || hostname.endsWith('.meituan.com')) return parseMeituanPage
-  if (hostname === 'dianping.com' || hostname.endsWith('.dianping.com')) return parseDianpingPage
+  const platform = platformForUrl(url)
+  if (platform === 'meituan') return parseMeituanPage
+  if (platform === 'dianping') return parseDianpingPage
   return parseAmapPage
 }
 

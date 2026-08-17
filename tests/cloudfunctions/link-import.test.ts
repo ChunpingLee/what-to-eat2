@@ -5,9 +5,11 @@ import type { Place } from '../../src/domain/favorites'
 import { createLinkImporter } from '../../cloudfunctions/link-import/index'
 import {
   MAX_RESPONSE_BYTES,
+  createPinnedHttpsRequest,
   createSafePageFetcher,
   resolveAllowedUrl,
   type AddressLookup,
+  type HttpsTransport,
   type SafeHttpRequest,
 } from '../../cloudfunctions/link-import/url-policy'
 
@@ -36,31 +38,63 @@ describe('link import URL policy', () => {
     'file:///etc/passwd',
     'https://dianping.com.evil.example/shop/abc',
     'https://user@www.dianping.com/shop/abc',
+    'https://anything.meituan.com/meishi/1',
+    'https://anything.dianping.com/shop/abc',
+    'https://anything.amap.com/place/xyz',
+    'https://meituan.com/meishi/1',
+    'https://dianping.com/shop/abc',
+    'https://amap.com/place/xyz',
   ])('rejects unsupported URL %s', async url => {
     await expect(resolveAllowedUrl(url, publicLookup)).rejects.toMatchObject({ code: 'UNSUPPORTED_LINK' })
   })
 
   it.each([
-    'https://www.meituan.com/meishi/123',
-    'https://m.dianping.com/shop/abc',
-    'https://ditu.amap.com/place/xyz',
-  ])('accepts a controlled platform host %s and resolves it before connecting', async url => {
+    ['美团', 'https://www.meituan.com/meishi/123'],
+    ['美团', 'https://m.meituan.com/meishi/123'],
+    ['点评', 'https://www.dianping.com/shop/abc'],
+    ['点评', 'https://m.dianping.com/shop/abc'],
+    ['高德', 'https://www.amap.com/place/xyz'],
+    ['高德', 'https://ditu.amap.com/place/xyz'],
+  ])('accepts the explicit %s share host %s and resolves it before connecting', async (_platform, url) => {
     await expect(resolveAllowedUrl(url, publicLookup)).resolves.toMatchObject({
       url: new URL(url), address: '93.184.216.34', family: 4,
     })
   })
 
-  it.each(['127.0.0.1', '10.0.0.8', '169.254.169.254', '172.16.0.2', '192.168.1.2', '::1', 'fe80::1', 'fc00::1', '::ffff:7f00:1'])
-  ('rejects DNS results that are loopback, private, or link-local: %s', async address => {
+  it.each([
+    '0.0.0.0', '10.0.0.8', '100.64.0.1', '127.0.0.1', '169.254.169.254', '172.16.0.2',
+    '192.0.0.1', '192.0.2.1', '192.168.1.2', '198.18.0.1', '198.51.100.1', '203.0.113.1',
+    '224.0.0.1', '240.0.0.1',
+    '::', '::1', 'fe80::1', 'fec0::1', 'fc00::1', 'ff02::1', '100::1', '2001:db8::1',
+    '2001::1', '2001:20::1', '2002:0808:0808::1', '64:ff9b::808:808', '64:ff9b:1::808:808',
+    '::ffff:7f00:1', '::ffff:0808:0808', '::ffff:8.8.8.8', '::ffff:0:808:808',
+  ])
+  ('rejects every address that is not explicit global unicast: %s', async address => {
     const lookup: AddressLookup = async () => [{ address, family: address.includes(':') ? 6 : 4 }]
     await expect(resolveAllowedUrl('https://www.dianping.com/shop/abc', lookup))
       .rejects.toMatchObject({ code: 'UNSUPPORTED_LINK' })
+  })
+
+  it.each(['8.8.8.8', '1.1.1.1', '2001:4860:4860::8888', '2606:4700:4700::1111'])
+  ('allows ordinary global-unicast DNS addresses: %s', async address => {
+    const lookup: AddressLookup = async () => [{ address, family: address.includes(':') ? 6 : 4 }]
+    await expect(resolveAllowedUrl('https://www.dianping.com/shop/abc', lookup))
+      .resolves.toMatchObject({ address })
   })
 
   it('rejects the whole host when any returned DNS address is private', async () => {
     const lookup: AddressLookup = async () => [
       { address: '93.184.216.34', family: 4 },
       { address: '127.0.0.1', family: 4 },
+    ]
+    await expect(resolveAllowedUrl('https://www.dianping.com/shop/abc', lookup))
+      .rejects.toMatchObject({ code: 'UNSUPPORTED_LINK' })
+  })
+
+  it('rejects the whole DNS answer set when any address has a mismatched family', async () => {
+    const lookup: AddressLookup = async () => [
+      { address: '8.8.8.8', family: 4 },
+      { address: '2001:4860:4860::8888', family: 4 },
     ]
     await expect(resolveAllowedUrl('https://www.dianping.com/shop/abc', lookup))
       .rejects.toMatchObject({ code: 'UNSUPPORTED_LINK' })
@@ -125,6 +159,93 @@ describe('link import URL policy', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('does not start an HTTPS request when DNS completes after the total deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      let finishLookup!: (addresses: Array<{ address: string; family: number }>) => void
+      const lookup: AddressLookup = () => new Promise(resolve => { finishLookup = resolve })
+      const request = vi.fn<SafeHttpRequest>()
+      const fetchPage = createSafePageFetcher({ lookup, request })
+      const result = fetchPage('https://www.dianping.com/shop/slow')
+      const rejection = expect(result).rejects.toMatchObject({ code: 'LINK_UNAVAILABLE' })
+
+      await vi.advanceTimersByTimeAsync(5_001)
+      await rejection
+      finishLookup([{ address: '8.8.8.8', family: 4 }])
+      await vi.runAllTimersAsync()
+      await Promise.resolve()
+      expect(request).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('pins a fresh TLS connection to the validated address without the global Agent', async () => {
+    let options: Record<string, unknown> | undefined
+    let onSocket: ((socket: unknown) => void) | undefined
+    const transport = ((
+      _url: URL,
+      requestOptions: Record<string, unknown>,
+      onResponse: (response: unknown) => void,
+    ) => {
+      options = requestOptions
+      const request = {
+        once(event: string, listener: (value: unknown) => void) {
+          if (event === 'socket') onSocket = listener
+          return request
+        },
+        destroy() {},
+        end() {
+          onSocket?.({
+            remoteAddress: '8.8.8.8',
+            once(event: string, listener: () => void) { if (event === 'secureConnect') listener() },
+          })
+          onResponse({ statusCode: 200, headers: {}, body: chunks(encoded('ok')), [Symbol.asyncIterator]: chunks(encoded('ok'))[Symbol.asyncIterator] })
+        },
+      }
+      return request
+    }) as unknown as HttpsTransport
+    const request = createPinnedHttpsRequest(transport)
+
+    await expect(request({ url: new URL('https://www.amap.com/place/1'), address: '8.8.8.8', family: 4 }, new AbortController().signal))
+      .resolves.toMatchObject({ status: 200 })
+    expect(options).toMatchObject({ agent: false, servername: 'www.amap.com', rejectUnauthorized: true })
+    const pinnedLookup = options?.lookup as (host: string, settings: unknown, callback: (error: null, address: string, family: number) => void) => void
+    let resolved: [string, number] | undefined
+    pinnedLookup('ignored.example', {}, (_error, address, family) => { resolved = [address, family] })
+    expect(resolved).toEqual(['8.8.8.8', 4])
+  })
+
+  it('rejects a connected socket whose normalized remote address differs from the validated address', async () => {
+    let onSocket: ((socket: unknown) => void) | undefined
+    let onError: ((error: unknown) => void) | undefined
+    const transport = ((
+      _url: URL,
+      _requestOptions: Record<string, unknown>,
+      _onResponse: (response: unknown) => void,
+    ) => {
+      const request = {
+        once(event: string, listener: (value: unknown) => void) {
+          if (event === 'socket') onSocket = listener
+          if (event === 'error') onError = listener
+          return request
+        },
+        destroy(error: unknown) { onError?.(error) },
+        end() {
+          onSocket?.({
+            remoteAddress: '1.1.1.1',
+            once(event: string, listener: () => void) { if (event === 'secureConnect') listener() },
+          })
+        },
+      }
+      return request
+    }) as unknown as HttpsTransport
+    const request = createPinnedHttpsRequest(transport)
+
+    await expect(request({ url: new URL('https://www.amap.com/place/1'), address: '8.8.8.8', family: 4 }, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'LINK_UNAVAILABLE' })
   })
 })
 

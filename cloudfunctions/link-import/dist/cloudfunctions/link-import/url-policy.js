@@ -4,7 +4,9 @@ exports.fetchAllowedPage = exports.LinkImportError = exports.TOTAL_TIMEOUT_MS = 
 exports.unsupportedLink = unsupportedLink;
 exports.unavailableLink = unavailableLink;
 exports.parseAllowedUrl = parseAllowedUrl;
+exports.platformForUrl = platformForUrl;
 exports.resolveAllowedUrl = resolveAllowedUrl;
+exports.createPinnedHttpsRequest = createPinnedHttpsRequest;
 exports.createSafePageFetcher = createSafePageFetcher;
 const promises_1 = require("node:dns/promises");
 const node_https_1 = require("node:https");
@@ -27,7 +29,14 @@ function unsupportedLink() {
 function unavailableLink() {
     return new LinkImportError('LINK_UNAVAILABLE', 'Link import is temporarily unavailable');
 }
-const PLATFORM_ROOTS = ['meituan.com', 'dianping.com', 'amap.com'];
+const PLATFORM_BY_HOST = Object.freeze({
+    'www.meituan.com': 'meituan',
+    'm.meituan.com': 'meituan',
+    'www.dianping.com': 'dianping',
+    'm.dianping.com': 'dianping',
+    'www.amap.com': 'amap',
+    'ditu.amap.com': 'amap',
+});
 function parseAllowedUrl(input) {
     let url;
     try {
@@ -37,11 +46,13 @@ function parseAllowedUrl(input) {
         throw unsupportedLink();
     }
     const hostname = url.hostname.toLowerCase();
-    const allowed = PLATFORM_ROOTS.some(root => hostname === root || hostname.endsWith(`.${root}`));
-    if (url.protocol !== 'https:' || url.port && url.port !== '443' || url.username || url.password || !allowed) {
+    if (url.protocol !== 'https:' || url.port && url.port !== '443' || url.username || url.password || !PLATFORM_BY_HOST[hostname]) {
         throw unsupportedLink();
     }
     return url;
+}
+function platformForUrl(input) {
+    return PLATFORM_BY_HOST[parseAllowedUrl(input).hostname];
 }
 const defaultLookup = async (hostname) => (0, promises_1.lookup)(hostname, { all: true, verbatim: true });
 function parseIpv4(address) {
@@ -50,21 +61,24 @@ function parseIpv4(address) {
         ? values
         : undefined;
 }
-function isBlockedIpv4(address) {
+function isGlobalIpv4(address) {
     const value = parseIpv4(address);
     if (!value)
-        return true;
-    const [a, b] = value;
-    return a === 0
+        return false;
+    const [a, b, c] = value;
+    return !(a === 0
         || a === 10
         || a === 100 && b >= 64 && b <= 127
         || a === 127
         || a === 169 && b === 254
         || a === 172 && b >= 16 && b <= 31
-        || a === 192 && (b === 0 || b === 168)
-        || a === 198 && (b === 18 || b === 19 || b === 51)
-        || a === 203 && b === 0
-        || a >= 224;
+        || a === 192 && b === 0
+        || a === 192 && b === 88 && c === 99
+        || a === 192 && b === 168
+        || a === 198 && (b === 18 || b === 19)
+        || a === 198 && b === 51 && c === 100
+        || a === 203 && b === 0 && c === 113
+        || a >= 224);
 }
 function ipv6Groups(address) {
     let normalized = address;
@@ -88,69 +102,93 @@ function ipv6Groups(address) {
         return undefined;
     return groups.map(group => Number.parseInt(group, 16));
 }
-function isBlockedAddress(address) {
+function isGlobalAddress(address) {
     const normalized = address.toLowerCase().split('%')[0];
     if ((0, node_net_1.isIP)(normalized) === 4)
-        return isBlockedIpv4(normalized);
+        return isGlobalIpv4(normalized);
     if ((0, node_net_1.isIP)(normalized) !== 6)
-        return true;
+        return false;
     const groups = ipv6Groups(normalized);
     if (!groups)
-        return true;
-    const ipv4Embedded = groups.slice(0, 5).every(group => group === 0)
-        && (groups[5] === 0 || groups[5] === 0xffff);
-    if (ipv4Embedded) {
-        return isBlockedIpv4(`${groups[6] >> 8}.${groups[6] & 255}.${groups[7] >> 8}.${groups[7] & 255}`);
-    }
-    return groups.every(group => group === 0)
-        || groups.slice(0, 7).every(group => group === 0) && groups[7] === 1
-        || groups[0] >= 0xfc00 && groups[0] <= 0xfdff
-        || groups[0] >= 0xfe80 && groups[0] <= 0xfebf
-        || groups[0] >= 0xff00;
+        return false;
+    const ipv4Embedded = groups.slice(0, 4).every(group => group === 0)
+        && (groups[4] === 0xffff || groups[5] === 0xffff);
+    if (ipv4Embedded)
+        return false;
+    const globallyAllocated = groups[0] >= 0x2000 && groups[0] <= 0x3fff;
+    const reserved2001 = groups[0] === 0x2001 && groups[1] <= 0x01ff;
+    const documentation = groups[0] === 0x2001 && groups[1] === 0x0db8
+        || groups[0] >= 0x3ff0 && groups[0] <= 0x3fff;
+    const transition = groups[0] === 0x2002;
+    return globallyAllocated && !reserved2001 && !documentation && !transition;
 }
-async function resolveAllowedUrl(input, lookup = defaultLookup) {
+function canonicalAddress(address) {
+    const normalized = address.toLowerCase().split('%')[0];
+    if ((0, node_net_1.isIP)(normalized) === 4)
+        return parseIpv4(normalized)?.join('.');
+    if ((0, node_net_1.isIP)(normalized) !== 6)
+        return undefined;
+    return ipv6Groups(normalized)?.map(group => group.toString(16)).join(':');
+}
+async function resolveAllowedUrl(input, lookup = defaultLookup, signal) {
     const url = parseAllowedUrl(input);
+    if (signal?.aborted)
+        throw unavailableLink();
     let addresses;
     try {
-        addresses = await lookup(url.hostname);
+        addresses = await lookup(url.hostname, signal);
     }
     catch {
         throw unavailableLink();
     }
-    if (!addresses.length || addresses.some(result => isBlockedAddress(result.address)))
+    if (signal?.aborted)
+        throw unavailableLink();
+    if (!addresses.length || addresses.some(result => !isGlobalAddress(result.address)
+        || result.family !== (0, node_net_1.isIP)(result.address)
+        || result.family !== 4 && result.family !== 6))
         throw unsupportedLink();
     const selected = addresses[0];
-    if (selected.family !== 4 && selected.family !== 6)
-        throw unsupportedLink();
     return { url, address: selected.address, family: selected.family };
 }
-const defaultRequest = (target, signal) => new Promise((resolve, reject) => {
-    const fixedLookup = ((_hostname, _options, callback) => {
-        callback(null, target.address, target.family);
-    });
-    const request = (0, node_https_1.request)(target.url, {
-        method: 'GET',
-        headers: {
-            accept: 'text/html,application/xhtml+xml',
-            'user-agent': 'most-want-to-eat-link-import/1.0',
-        },
-        lookup: fixedLookup,
-        servername: target.url.hostname,
-        signal,
-    }, response => resolve({
-        status: response.statusCode ?? 0,
-        headers: response.headers,
-        body: response,
-    }));
-    request.once('socket', socket => {
-        socket.once('secureConnect', () => {
-            if (socket.remoteAddress && socket.remoteAddress !== target.address)
-                request.destroy(unavailableLink());
+function createPinnedHttpsRequest(transport = node_https_1.request) {
+    return (target, signal) => new Promise((resolve, reject) => {
+        let verified = false;
+        const fixedLookup = ((_hostname, _options, callback) => {
+            callback(null, target.address, target.family);
         });
+        const request = transport(target.url, {
+            method: 'GET',
+            headers: {
+                accept: 'text/html,application/xhtml+xml',
+                'user-agent': 'most-want-to-eat-link-import/1.0',
+            },
+            lookup: fixedLookup,
+            servername: target.url.hostname,
+            rejectUnauthorized: true,
+            agent: false,
+            signal,
+        }, response => {
+            if (!verified) {
+                request.destroy(unavailableLink());
+                return;
+            }
+            resolve({ status: response.statusCode ?? 0, headers: response.headers, body: response });
+        });
+        request.once('socket', socket => {
+            socket.once('secureConnect', () => {
+                const remote = socket.remoteAddress;
+                if (!remote || !isGlobalAddress(remote) || canonicalAddress(remote) !== canonicalAddress(target.address)) {
+                    request.destroy(unavailableLink());
+                    return;
+                }
+                verified = true;
+            });
+        });
+        request.once('error', reject);
+        request.end();
     });
-    request.once('error', reject);
-    request.end();
-});
+}
+const defaultRequest = createPinnedHttpsRequest();
 function header(headers, name) {
     const value = headers[name];
     return Array.isArray(value) ? value[0] : value;
@@ -192,7 +230,9 @@ function createSafePageFetcher({ lookup = defaultLookup, request = defaultReques
         const operation = async () => {
             let current = parseAllowedUrl(input);
             for (let redirects = 0;; redirects += 1) {
-                const target = await resolveAllowedUrl(current, lookup);
+                const target = await resolveAllowedUrl(current, lookup, controller.signal);
+                if (controller.signal.aborted)
+                    throw unavailableLink();
                 const response = await request(target, controller.signal);
                 if (response.status >= 300 && response.status < 400) {
                     await readLimitedBody(response, controller.signal);
