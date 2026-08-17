@@ -1,7 +1,19 @@
 import { distanceMeters } from './geo'
 import type { GeoPoint } from '../shared/types'
 
-export interface Place { poiId: string; name: string; location: GeoPoint; address: string; businessArea?: string; categories: string[] }
+export interface Place {
+  poiId: string
+  name: string
+  location: GeoPoint
+  address: string
+  businessArea?: string
+  categories: string[]
+  rating?: number
+  averageCost?: number
+  tags?: string[]
+  photos?: string[]
+  businessStatus?: string
+}
 export type FavoriteSource = 'search' | 'link' | 'recommendation' | 'share'
 export interface Favorite { poiId: string; note?: string; source: FavoriteSource; createdAt: string }
 export interface NearbyFavorite { place: Place; distanceMeters: number }
