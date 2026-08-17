@@ -17,8 +17,12 @@ function createFavoritesHandler(deps) {
         }
         const existingSet = await deps.repo.findExisting(openid, event.poiIds);
         const plan = (0, favorites_1.planFavoriteBatch)(event.poiIds, existingSet);
-        await deps.repo.insert(openid, plan.toCreate);
-        return { created: plan.toCreate, existing: plan.existing, duplicateSelections: plan.duplicateSelections };
+        const inserted = await deps.repo.insert(openid, plan.toCreate);
+        return {
+            created: inserted.created,
+            existing: [...plan.existing, ...inserted.existing],
+            duplicateSelections: plan.duplicateSelections,
+        };
     };
 }
 const main = (event) => {

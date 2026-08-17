@@ -38,7 +38,7 @@ describe('favorites cloud function', () => {
     const repo = {
       list: vi.fn(),
       findExisting: vi.fn().mockResolvedValue(new Set(['p2'])),
-      insert: vi.fn().mockResolvedValue(undefined),
+      insert: vi.fn().mockResolvedValue({ created: ['p1'], existing: [] }),
       remove: vi.fn(),
     }
     const handler = createFavoritesHandler({ getOpenId: () => 'u1', repo })
@@ -63,6 +63,35 @@ describe('favorites cloud function', () => {
     await repo.insert('u1', ['p1'])
 
     expect(where).toHaveBeenCalledWith({ _openid: 'u1', poiId: { $in: ['p1', 'p2'] } })
-    expect(add).toHaveBeenCalledWith({ data: { poiId: 'p1', _openid: 'u1' } })
+    expect(add).toHaveBeenCalledWith({
+      data: { _id: '5a703d644abc1f2d890a19dc6090521e39ca583e7bd98ca41a896d974188f278', poiId: 'p1', _openid: 'u1' },
+    })
+  })
+
+  it('atomically classifies one of two concurrent additions as existing', async () => {
+    const records = new Map<string, { _id: string; poiId: string; _openid: string }>()
+    const collection = () => ({
+      where: (query: Record<string, unknown>) => ({
+        get: async () => ({
+          data: [...records.values()].filter(record => record._openid === query._openid && record.poiId === query.poiId),
+        }),
+        remove: async () => undefined,
+      }),
+      add: async ({ data }: { data: { _id: string; poiId: string; _openid: string } }) => {
+        if (records.has(data._id)) throw { code: 'DATABASE_DUPLICATE_WRITE' }
+        records.set(data._id, data)
+      },
+    })
+    const repo = createCloudBaseFavoritesRepository({ collection } as never)
+    const handler = createFavoritesHandler({ getOpenId: () => 'u1', repo })
+
+    const results = await Promise.all([
+      handler({ action: 'addBatch', poiIds: ['p1'] }),
+      handler({ action: 'addBatch', poiIds: ['p1'] }),
+    ])
+
+    expect(records.size).toBe(1)
+    expect(results.flatMap(result => result.created)).toEqual(['p1'])
+    expect(results.flatMap(result => result.existing)).toEqual(['p1'])
   })
 })
