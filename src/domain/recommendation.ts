@@ -40,11 +40,12 @@ const normalized = (value: string) => value.trim().toLocaleLowerCase('zh-CN')
 const nonEmpty = (value: string | undefined): value is string => Boolean(value?.trim())
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
 const presentStrings = (values: string[] | undefined) => values?.filter(nonEmpty).map(normalized) ?? []
+const optionalNormalized = (value: string | undefined) => value === undefined ? undefined : normalized(value) || undefined
 
 function preferenceSignal(candidate: RecommendationCandidate, request: RecommendationRequest): RecommendationSignal | undefined {
   if (request.random) return undefined
-  const category = request.category && normalized(request.category)
-  const keywords = request.keywords?.split(/[\s,，、/]+/).filter(Boolean).map(normalized) ?? []
+  const category = optionalNormalized(request.category)
+  const keywords = [...new Set(request.keywords?.split(/[\s,，、/]+/).map(normalized).filter(Boolean) ?? [])]
   if (!category && keywords.length === 0) return undefined
 
   const searchable = [...presentStrings(candidate.place.categories), ...presentStrings(candidate.place.tags), normalized(candidate.place.name)]
@@ -124,8 +125,18 @@ function comparableRating(place: Place): number {
   return finite(place.rating) && place.rating >= 0 && place.rating <= 5 ? place.rating : -1
 }
 
+function validateCandidate(candidate: RecommendationCandidate): void {
+  if (!finite(candidate.distanceMeters) || candidate.distanceMeters < 0) {
+    throw new RangeError(`Invalid candidate distanceMeters for ${candidate.place.poiId}`)
+  }
+  if (candidate.travelMinutes !== undefined && (!finite(candidate.travelMinutes) || candidate.travelMinutes < 0)) {
+    throw new RangeError(`Invalid candidate travelMinutes for ${candidate.place.poiId}`)
+  }
+}
+
 export function rankRecommendations(candidates: RecommendationCandidate[], request: RecommendationRequest): RankedPlace[] {
   if (!finite(request.radiusMeters) || request.radiusMeters <= 0) throw new RangeError('radiusMeters must be greater than 0')
+  candidates.forEach(validateCandidate)
 
   return candidates.map(candidate => {
     const signals = [

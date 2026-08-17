@@ -156,6 +156,65 @@ describe('rankRecommendations', () => {
     expect(result.reasons).toEqual([])
   })
 
+  it('does not turn a whitespace category into a preference match when keywords miss', () => {
+    const [result] = rankRecommendations([candidate({ distanceMeters: 0 })], {
+      center,
+      radiusMeters: 1_000,
+      travelMode: 'walking',
+      category: '   ',
+      keywords: '未命中',
+    })
+
+    expect(result.score).toBe(46.15)
+    expect(result.reasons).toEqual([expect.stringContaining('0 米')])
+  })
+
+  it('lets a matching keyword alone determine the preference when category is whitespace', () => {
+    const [result] = rankRecommendations([candidate({
+      distanceMeters: 1_000,
+      place: { tags: ['牛肉'] },
+    })], {
+      center,
+      radiusMeters: 1_000,
+      travelMode: 'walking',
+      category: '   ',
+      keywords: '牛肉',
+    })
+
+    expect(result.score).toBe(51.19)
+    expect(result.reasons).toEqual([expect.stringContaining('牛肉')])
+  })
+
+  it('deduplicates normalized keywords before calculating a partial-match score', () => {
+    const candidateWithOneKeyword = candidate({
+      distanceMeters: 1_000,
+      place: { tags: ['麻辣'] },
+    })
+    const baseRequest = { center, radiusMeters: 1_000, travelMode: 'walking' as const }
+
+    const [unique] = rankRecommendations([candidateWithOneKeyword], { ...baseRequest, keywords: '麻辣 牛肉' })
+    const [repeated] = rankRecommendations([candidateWithOneKeyword], { ...baseRequest, keywords: '麻辣 麻辣 牛肉' })
+
+    expect(repeated.score).toBe(21.19)
+    expect(repeated).toEqual(unique)
+  })
+
+  it.each([NaN, Infinity, -1])('rejects invalid candidate distanceMeters: %s', distanceMeters => {
+    expect(() => rankRecommendations([candidate({ distanceMeters })], {
+      center,
+      radiusMeters: 1_000,
+      travelMode: 'walking',
+    })).toThrow('Invalid candidate distanceMeters for hotpot')
+  })
+
+  it.each([NaN, Infinity, -1])('rejects invalid candidate travelMinutes: %s', travelMinutes => {
+    expect(() => rankRecommendations([candidate({ travelMinutes })], {
+      center,
+      radiusMeters: 1_000,
+      travelMode: 'walking',
+    })).toThrow('Invalid candidate travelMinutes for hotpot')
+  })
+
   it('does not cite unmatched keywords when an exact category was the signal', () => {
     const [result] = rankRecommendations([candidate({
       distanceMeters: 1_000,
