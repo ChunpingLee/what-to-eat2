@@ -11,6 +11,9 @@
   <navigator url="/pages/import/index" class="recommend-link">
     <button class="secondary">粘贴分享链接导入</button>
   </navigator>
+  <navigator url="/pages/settings/index" class="recommend-link">
+    <button class="secondary">设置与个人数据</button>
+  </navigator>
 
   <view wx:if="{{status === 'locationRequired'}}" class="location-required">
     <text>需要地点才能按距离展示你的收藏。</text>
@@ -26,11 +29,11 @@
     </view>
     <view wx:if="{{status === 'empty'}}" class="hint">这个范围内还没有收藏。</view>
 
-    <view wx:for="{{items}}" wx:key="poiId" class="favorite-card">
+    <navigator wx:for="{{items}}" wx:key="poiId" class="favorite-card" url="/pages/place-detail/index?v=1&amp;poiId={{item.place.poiId}}">
       <view class="name">{{item.place.name}}</view>
       <view class="address">{{item.place.address || ''}}</view>
       <view class="distance">{{item.distanceMeters}} 米</view>
-    </view>
+    </navigator>
 
     <navigator wx:if="{{showRecommend}}" url="/pages/recommend/index" class="recommend-link">
       <button class="recommend-button">换成附近推荐</button>

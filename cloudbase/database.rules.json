@@ -29,6 +29,11 @@
       "name": "amap_route_rate_limits",
       "aclTag": "CUSTOM",
       "rule": { "read": false, "write": false }
+    },
+    {
+      "name": "place_search_cache",
+      "aclTag": "CUSTOM",
+      "rule": { "read": false, "write": false }
     }
   ]
 }

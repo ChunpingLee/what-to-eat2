@@ -23,6 +23,13 @@ declare const wx: {
     fail(error: unknown): void
   }): void
   showToast(options: { title: string; icon: 'none' }): void
+  showModal(options: {
+    title: string
+    content: string
+    confirmText?: string
+    confirmColor?: string
+  }): Promise<{ confirm: boolean; cancel: boolean }>
+  reLaunch(options: { url: string }): void
   openLocation(options: {
     latitude: number
     longitude: number
@@ -35,6 +42,11 @@ declare const wx: {
     init(options: { env: string }): void
     callFunction<T>(options: { name: string; data: unknown }): Promise<WxCloudCallResult<T>>
   }
+}
+
+interface MiniProgramShareMessage {
+  title: string
+  path: string
 }
 
 declare function App<T>(options: T): void

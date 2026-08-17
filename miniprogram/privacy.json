@@ -1,0 +1,26 @@
+{
+  "version": "1",
+  "requiredPrivateInfos": ["getLocation", "chooseLocation"],
+  "dataPractices": [
+    {
+      "data": "位置",
+      "purpose": "按距离展示附近收藏、搜索餐厅和估算步行、骑行或驾车时间",
+      "retention": "不保存持续位置轨迹"
+    },
+    {
+      "data": "收藏",
+      "purpose": "保存当前微信账号主动加入的餐厅",
+      "retention": "仅当前账号可读，可通过注销删除"
+    },
+    {
+      "data": "导入链接",
+      "purpose": "解析用户主动粘贴的高德、大众点评或美团餐厅链接",
+      "retention": "仅当前账号可读，不保存第三方账号凭证，可通过注销删除"
+    },
+    {
+      "data": "推荐反馈",
+      "purpose": "记录用户对附近餐厅推荐的主动反馈，用于改善推荐质量",
+      "retention": "仅当前账号可读，可通过注销删除"
+    }
+  ]
+}

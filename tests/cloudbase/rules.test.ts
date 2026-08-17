@@ -19,6 +19,10 @@ it('defines per-collection deployable rules that deny direct writes to private d
     aclTag: 'CUSTOM',
     rule: { read: false, write: false },
   })
+  expect(byName.get('place_search_cache')).toMatchObject({
+    aclTag: 'CUSTOM',
+    rule: { read: false, write: false },
+  })
 })
 
 it('exposes the rule manifest through an executable deployment command', () => {

@@ -1,0 +1,15 @@
+<view class="page">
+  <view wx:if="{{status === 'loading'}}" class="hint">正在重新查询公开餐厅信息…</view>
+  <view wx:if="{{status === 'error'}}" class="error">无法打开分享：{{errorMessage}}</view>
+  <view wx:if="{{status === 'ready' && place}}" class="card">
+    <view class="name">{{place.name}}</view>
+    <view class="address">{{place.address || ''}}</view>
+    <view wx:if="{{categoriesText}}" class="meta">{{categoriesText}}</view>
+    <button class="primary" bindtap="onOpenLocation">打开地图导航</button>
+    <button class="primary" loading="{{adding}}" disabled="{{adding || favoriteAdded}}" bindtap="onAddFavorite">
+      {{favoriteAdded ? '已加入我的收藏' : '加入我的收藏'}}
+    </button>
+    <button class="secondary" open-type="share">分享这家店</button>
+    <view wx:if="{{errorMessage}}" class="error">{{errorMessage}}</view>
+  </view>
+</view>

@@ -29,7 +29,7 @@ function createMemorySearchCache() {
     };
 }
 function validate(query) {
-    if (!query.keywords.trim() || !query.city.trim() || !Number.isFinite(query.center.latitude) || !Number.isFinite(query.center.longitude)
+    if (!query.keywords.trim() || !Number.isFinite(query.center.latitude) || !Number.isFinite(query.center.longitude)
         || !Number.isFinite(query.radiusMeters) || query.radiusMeters <= 0) {
         throw new errors_1.SafeError('INVALID_SEARCH_QUERY', 'Invalid place search query');
     }

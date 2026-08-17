@@ -1,9 +1,22 @@
 {
-  "pages": ["pages/home/index", "pages/import/index", "pages/place-search/index", "pages/recommend/index"],
+  "pages": [
+    "pages/home/index",
+    "pages/import/index",
+    "pages/place-search/index",
+    "pages/recommend/index",
+    "pages/place-detail/index",
+    "pages/settings/index"
+  ],
   "window": {
     "navigationBarTitleText": "最想吃啥",
     "navigationBarBackgroundColor": "#ffffff",
     "navigationBarTextStyle": "black",
     "backgroundColor": "#f7f8fa"
-  }
+  },
+  "permission": {
+    "scope.userLocation": {
+      "desc": "用于展示附近收藏、搜索餐厅并计算路线时间"
+    }
+  },
+  "requiredPrivateInfos": ["getLocation", "chooseLocation"]
 }

@@ -73,3 +73,19 @@ export async function recommendPlaces(request: RecommendationRequest): Promise<R
   })
   return response.result
 }
+
+export async function resolveSharedPlace(payload: { v: 1; poiId: string }): Promise<Place> {
+  const response = await wx.cloud.callFunction<{ place: Place }>({
+    name: 'share-place',
+    data: payload,
+  })
+  return response.result.place
+}
+
+export async function deleteAccount(): Promise<{ deleted: Record<string, number> }> {
+  const response = await wx.cloud.callFunction<{ deleted: Record<string, number> }>({
+    name: 'delete-account',
+    data: {},
+  })
+  return response.result
+}

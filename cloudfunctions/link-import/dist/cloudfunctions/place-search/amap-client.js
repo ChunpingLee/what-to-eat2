@@ -79,10 +79,14 @@ function createAmapHttp(fetcher = fetch) {
                 keywords: query.keywords,
                 location: query.location,
                 radius: String(query.radius),
-                region: query.region,
-                city_limit: String(query.cityLimit),
                 show_fields: query.showFields,
             });
+            if (query.region) {
+                params.set('region', query.region);
+                params.set('city_limit', String(query.cityLimit));
+            }
+            if (query.pageSize !== undefined)
+                params.set('page_size', String(query.pageSize));
             const response = await fetcher(`https://restapi.amap.com/v5/place/around?${params}`, { signal: controller.signal });
             if (!response.ok)
                 throw new errors_1.SafeError('AMAP_UNAVAILABLE', 'Place search is temporarily unavailable');
@@ -110,9 +114,10 @@ function createAmapClient({ key = process.env.AMAP_WEB_KEY, http = createAmapHtt
                 keywords: query.keywords.trim(),
                 location: `${query.center.longitude},${query.center.latitude}`,
                 radius: query.radiusMeters,
-                region: query.city.trim(),
-                cityLimit: true,
+                ...(query.city.trim() ? { region: query.city.trim() } : {}),
+                cityLimit: Boolean(query.city.trim()),
                 showFields: 'business,photos',
+                pageSize: 25,
             });
             if (response.status !== '1' || !Array.isArray(response.pois)) {
                 throw new errors_1.SafeError('AMAP_UNAVAILABLE', 'Place search is temporarily unavailable');
