@@ -7,6 +7,7 @@ import {
   MAX_RESPONSE_BYTES,
   createPinnedHttpsRequest,
   createSafePageFetcher,
+  parseAllowedUrl,
   resolveAllowedUrl,
   type AddressLookup,
   type HttpsTransport,
@@ -32,6 +33,24 @@ function place(poiId: string, name = '示例火锅'): Place {
 }
 
 describe('link import URL policy', () => {
+  it.each([
+    'https://constructor/',
+    'https://CONSTRUCTOR/',
+    'https://constructor./',
+    'https://__proto__/',
+    'https://__PROTO__/',
+    'https://__proto__./',
+  ])('rejects prototype-chain hostname %s before DNS or HTTP', async url => {
+    const lookup = vi.fn<AddressLookup>().mockResolvedValue([{ address: '8.8.8.8', family: 4 }])
+    const request = vi.fn<SafeHttpRequest>().mockResolvedValue(response(200, '<title>must not load</title>'))
+
+    expect(() => parseAllowedUrl(url)).toThrow('UNSUPPORTED_LINK')
+    await expect(resolveAllowedUrl(url, lookup)).rejects.toMatchObject({ code: 'UNSUPPORTED_LINK' })
+    await expect(createSafePageFetcher({ lookup, request })(url)).rejects.toMatchObject({ code: 'UNSUPPORTED_LINK' })
+    expect(lookup).not.toHaveBeenCalled()
+    expect(request).not.toHaveBeenCalled()
+  })
+
   it.each([
     'http://www.dianping.com/shop/abc',
     'https://evil.example/a',

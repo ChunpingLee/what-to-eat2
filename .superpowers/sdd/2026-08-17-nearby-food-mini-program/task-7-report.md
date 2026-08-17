@@ -40,7 +40,7 @@ This environment does not provide WeChat Developer Tools or authenticated real-p
 - Replaced suffix matching with one exact host-to-parser map for the six fixture-backed hosts.
 - Replaced the partial IP denylist with global-unicast classification: IPv4 special-use blocks are excluded; IPv6 must be inside allocated `2000::/3` while special/reserved, documentation, transition, mapped, translated, and embedded forms are rejected. Every DNS result must also have the correct family.
 - Each request now sets `agent: false`, pins the validated address through `lookup`, retains the original hostname as TLS `servername`, keeps `rejectUnauthorized: true`, canonicalizes the connected peer address, and rejects any mismatch.
-- DNS receives the abort signal and the signal is checked immediately before and after every lookup and again before HTTPS request creation.
+- Node's `dns.promises.lookup` is not cancellable in the deployed runtime. The address-lookup abstraction accepts a signal for cancellable adapters, while mandatory abort gates immediately before and after lookup and before HTTPS creation prevent late DNS results from starting a request.
 
 ### Fix-round verification
 
@@ -48,5 +48,26 @@ This environment does not provide WeChat Developer Tools or authenticated real-p
 - `npm test` — passed: 10 files / 117 tests.
 - `npm run typecheck` — passed.
 - `npm run build` in `cloudfunctions/link-import`, `cloudfunctions/place-search`, and `cloudfunctions/favorites` — passed.
+- `git diff --check` — passed.
+- Real-platform and WeChat Developer Tools manual verification remains unavailable in this environment.
+
+## Fix round 2 — prototype-safe host authorization
+
+### RED
+
+- Added `parseAllowedUrl`, `resolveAllowedUrl`, and full fetch-path regressions for `constructor` and `__proto__`, including uppercase and trailing-dot variants.
+- Four non-trailing-dot variants were accepted because the plain host table inherited truthy properties from `Object.prototype`. The tests also prove rejected hosts never reach DNS or HTTP.
+
+### GREEN
+
+- Replaced the plain host object with `ReadonlyMap<string, LinkPlatform>`. URL authorization and parser selection now use exact `Map.get` results from the same table.
+- Confirmed that Node 25's `dns.promises.lookup` ignores an `AbortSignal` and its type does not expose one. Documentation now states that OS DNS cannot be cancelled, while the post-lookup abort gate guarantees a late result cannot create an HTTPS request.
+
+### Fix-round verification
+
+- `npm test -- tests/cloudfunctions/link-import.test.ts` — passed: 76 tests.
+- `npm test` — passed: 10 files / 123 tests.
+- `npm run typecheck` — passed.
+- `npm run build` in `cloudfunctions/link-import` — passed.
 - `git diff --check` — passed.
 - Real-platform and WeChat Developer Tools manual verification remains unavailable in this environment.

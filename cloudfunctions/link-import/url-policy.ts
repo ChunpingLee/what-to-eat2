@@ -25,14 +25,14 @@ export function unavailableLink(): LinkImportError {
 
 export type LinkPlatform = 'meituan' | 'dianping' | 'amap'
 
-const PLATFORM_BY_HOST: Readonly<Record<string, LinkPlatform>> = Object.freeze({
-  'www.meituan.com': 'meituan',
-  'm.meituan.com': 'meituan',
-  'www.dianping.com': 'dianping',
-  'm.dianping.com': 'dianping',
-  'www.amap.com': 'amap',
-  'ditu.amap.com': 'amap',
-})
+const PLATFORM_BY_HOST: ReadonlyMap<string, LinkPlatform> = new Map([
+  ['www.meituan.com', 'meituan'],
+  ['m.meituan.com', 'meituan'],
+  ['www.dianping.com', 'dianping'],
+  ['m.dianping.com', 'dianping'],
+  ['www.amap.com', 'amap'],
+  ['ditu.amap.com', 'amap'],
+])
 
 export function parseAllowedUrl(input: string | URL): URL {
   let url: URL
@@ -42,14 +42,16 @@ export function parseAllowedUrl(input: string | URL): URL {
     throw unsupportedLink()
   }
   const hostname = url.hostname.toLowerCase()
-  if (url.protocol !== 'https:' || url.port && url.port !== '443' || url.username || url.password || !PLATFORM_BY_HOST[hostname]) {
+  if (url.protocol !== 'https:' || url.port && url.port !== '443' || url.username || url.password || !PLATFORM_BY_HOST.get(hostname)) {
     throw unsupportedLink()
   }
   return url
 }
 
 export function platformForUrl(input: string | URL): LinkPlatform {
-  return PLATFORM_BY_HOST[parseAllowedUrl(input).hostname]
+  const platform = PLATFORM_BY_HOST.get(parseAllowedUrl(input).hostname)
+  if (!platform) throw unsupportedLink()
+  return platform
 }
 
 export interface ResolvedAddress { address: string; family: number }

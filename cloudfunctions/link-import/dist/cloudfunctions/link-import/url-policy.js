@@ -29,14 +29,14 @@ function unsupportedLink() {
 function unavailableLink() {
     return new LinkImportError('LINK_UNAVAILABLE', 'Link import is temporarily unavailable');
 }
-const PLATFORM_BY_HOST = Object.freeze({
-    'www.meituan.com': 'meituan',
-    'm.meituan.com': 'meituan',
-    'www.dianping.com': 'dianping',
-    'm.dianping.com': 'dianping',
-    'www.amap.com': 'amap',
-    'ditu.amap.com': 'amap',
-});
+const PLATFORM_BY_HOST = new Map([
+    ['www.meituan.com', 'meituan'],
+    ['m.meituan.com', 'meituan'],
+    ['www.dianping.com', 'dianping'],
+    ['m.dianping.com', 'dianping'],
+    ['www.amap.com', 'amap'],
+    ['ditu.amap.com', 'amap'],
+]);
 function parseAllowedUrl(input) {
     let url;
     try {
@@ -46,13 +46,16 @@ function parseAllowedUrl(input) {
         throw unsupportedLink();
     }
     const hostname = url.hostname.toLowerCase();
-    if (url.protocol !== 'https:' || url.port && url.port !== '443' || url.username || url.password || !PLATFORM_BY_HOST[hostname]) {
+    if (url.protocol !== 'https:' || url.port && url.port !== '443' || url.username || url.password || !PLATFORM_BY_HOST.get(hostname)) {
         throw unsupportedLink();
     }
     return url;
 }
 function platformForUrl(input) {
-    return PLATFORM_BY_HOST[parseAllowedUrl(input).hostname];
+    const platform = PLATFORM_BY_HOST.get(parseAllowedUrl(input).hostname);
+    if (!platform)
+        throw unsupportedLink();
+    return platform;
 }
 const defaultLookup = async (hostname) => (0, promises_1.lookup)(hostname, { all: true, verbatim: true });
 function parseIpv4(address) {
