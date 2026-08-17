@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyBatchResult, createBranchPicker } from '../../miniprogram/components/branch-picker/index'
+import { applyBatchResult, createBranchPicker, prepareBranchItems } from '../../miniprogram/components/branch-picker/index'
 
 describe('branch picker model', () => {
   it('allows multiple branches but never selects an existing favorite', () => {
@@ -42,6 +42,16 @@ describe('branch picker model', () => {
     })).toEqual([
       { poiId: 'p1', name: '店 A', distanceMeters: 100, status: 'created' },
       { poiId: 'p2', name: '店 B', distanceMeters: 200, status: 'failed', failureCode: 'DATABASE_PERMISSION_DENIED' },
+    ])
+  })
+
+  it('precomputes selection and disabled state for the template', () => {
+    expect(prepareBranchItems([
+      { poiId: 'p1', name: '可选', distanceMeters: 100 },
+      { poiId: 'p2', name: '已加入', distanceMeters: 200, status: 'existing' },
+    ], ['p1', 'p2'])).toEqual([
+      { poiId: 'p1', name: '可选', distanceMeters: 100, selected: true, disabled: false },
+      { poiId: 'p2', name: '已加入', distanceMeters: 200, status: 'existing', selected: false, disabled: true },
     ])
   })
 })

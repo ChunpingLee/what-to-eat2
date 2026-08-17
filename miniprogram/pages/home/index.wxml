@@ -5,6 +5,10 @@
     <button wx:for="{{radiusOptions}}" wx:key="*this" class="radius-button {{radiusMeters === item * 1000 ? 'active' : ''}}" data-radius="{{item}}" bindtap="onRadiusChange">{{item}} 公里</button>
   </view>
 
+  <navigator url="/pages/place-search/index" class="recommend-link">
+    <button class="recommend-button">加入想吃 / 搜索分店</button>
+  </navigator>
+
   <view wx:if="{{status === 'locationRequired'}}" class="location-required">
     <text>需要地点才能按距离展示你的收藏。</text>
     <button bindtap="requestCurrentLocation">允许定位</button>
@@ -27,9 +31,6 @@
 
     <navigator wx:if="{{showRecommend}}" url="/pages/recommend/index" class="recommend-link">
       <button class="recommend-button">换成附近推荐</button>
-    </navigator>
-    <navigator url="/pages/place-search/index" class="recommend-link">
-      <button class="recommend-button">加入想吃 / 搜索分店</button>
     </navigator>
     <button class="secondary" bindtap="onManualLocation">手动选择地点</button>
   </view>

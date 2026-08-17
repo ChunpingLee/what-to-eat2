@@ -26,6 +26,16 @@ export interface BranchItem {
   distanceMeters: number
   status?: 'created' | 'existing' | 'failed'
   failureCode?: string
+  selected?: boolean
+  disabled?: boolean
+}
+
+export function prepareBranchItems(items: readonly BranchItem[], selectedPoiIds: readonly string[]): BranchItem[] {
+  const selected = new Set(selectedPoiIds)
+  return items.map(item => {
+    const disabled = item.status === 'created' || item.status === 'existing'
+    return { ...item, selected: !disabled && selected.has(item.poiId), disabled }
+  })
 }
 
 export interface FavoriteBatchResult {
@@ -53,7 +63,9 @@ interface ToggleEvent {
 
 interface BranchPickerComponent {
   properties: { items: BranchItem[]; selectedPoiIds: string[] }
+  setData(data: { displayItems: BranchItem[] }): void
   triggerEvent(name: 'change', detail: { poiIds: string[] }): void
+  refreshDisplay(): void
   onToggle(event: ToggleEvent): void
 }
 
@@ -63,7 +75,14 @@ if (typeof Component === 'function') {
       items: { type: Array, value: [] },
       selectedPoiIds: { type: Array, value: [] },
     },
+    data: { displayItems: [] },
+    observers: {
+      'items, selectedPoiIds'(this: BranchPickerComponent) { this.refreshDisplay() },
+    },
     methods: {
+      refreshDisplay(this: BranchPickerComponent) {
+        this.setData({ displayItems: prepareBranchItems(this.properties.items, this.properties.selectedPoiIds) })
+      },
       onToggle(this: BranchPickerComponent, event: ToggleEvent) {
         const poiId = event.currentTarget.dataset.poiId
         if (typeof poiId !== 'string') return

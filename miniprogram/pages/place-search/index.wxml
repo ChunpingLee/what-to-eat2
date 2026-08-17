@@ -4,6 +4,7 @@
   <input class="input" placeholder="餐厅名称，例如：海底捞" value="{{keywords}}" bindinput="onKeywordInput" />
   <input class="input" placeholder="城市，例如：上海" value="{{city}}" bindinput="onCityInput" />
   <button class="primary" loading="{{status === 'searching'}}" bindtap="onSearch">搜索附近分店</button>
+  <button class="secondary" bindtap="onManualLocation">手动选择搜索地点</button>
 
   <view wx:if="{{status === 'error'}}" class="error">{{errorMessage}}</view>
   <view wx:if="{{status === 'empty'}}" class="hint">没有找到附近分店。</view>

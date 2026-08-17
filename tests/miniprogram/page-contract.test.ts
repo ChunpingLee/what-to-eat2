@@ -45,3 +45,18 @@ it('registers the branch search page and exposes it from the home page', () => {
   expect(read('miniprogram/pages/home/index.wxml')).toContain('url="/pages/place-search/index"')
   expect(read('miniprogram/pages/place-search/index.wxml')).toContain('branch-picker')
 })
+
+it('keeps branch search reachable while home is waiting for location permission', () => {
+  const home = read('miniprogram/pages/home/index.wxml')
+  const beforeLocationBranch = home.slice(0, home.indexOf("status === 'locationRequired'"))
+
+  expect(beforeLocationBranch).toContain('url="/pages/place-search/index"')
+  expect(read('miniprogram/pages/place-search/index.wxml')).toContain('bindtap="onManualLocation"')
+})
+
+it('renders precomputed branch selection instead of invoking array methods in WXML', () => {
+  const picker = read('miniprogram/components/branch-picker/index.wxml')
+
+  expect(picker).toContain('item.selected')
+  expect(picker).not.toMatch(/selectedPoiIds\s*\./)
+})
