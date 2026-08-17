@@ -24,7 +24,7 @@ interface PickerEvent { detail: { poiIds?: unknown } }
 interface PlaceSearchPage {
   data: PlaceSearchData
   setData(data: Partial<PlaceSearchData>): void
-  onLoad(): void
+  onLoad(options: Record<string, unknown>): void
   onKeywordInput(event: InputEvent): void
   onCityInput(event: InputEvent): void
   onSearch(): void
@@ -37,6 +37,15 @@ interface PlaceSearchPage {
 function textValue(value: unknown): string { return typeof value === 'string' ? value : '' }
 function selectedIds(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+}
+
+function decodedQueryText(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  try { return decodeURIComponent(value).trim() } catch { return value.trim() }
+}
+
+export function searchPrefill(options: Record<string, unknown>) {
+  return { keywords: decodedQueryText(options.keywords), city: decodedQueryText(options.city) }
 }
 
 function visibleError(error: unknown): string {
@@ -127,7 +136,9 @@ if (typeof Page === 'function') {
       submitting: false, errorMessage: '', stale: false,
     },
 
-    onLoad(this: PlaceSearchPage) {
+    onLoad(this: PlaceSearchPage, options: Record<string, unknown>) {
+      const prefill = searchPrefill(options)
+      if (prefill.keywords || prefill.city) this.setData(prefill)
       void controller.refreshFavorites().catch(error => {
         if (this.data.status === 'idle') {
           this.setData({ status: 'error', errorMessage: `无法确认已有收藏：${visibleError(error)}` })

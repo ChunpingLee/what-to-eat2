@@ -8,6 +8,9 @@
   <navigator url="/pages/place-search/index" class="recommend-link">
     <button class="recommend-button">加入想吃 / 搜索分店</button>
   </navigator>
+  <navigator url="/pages/import/index" class="recommend-link">
+    <button class="secondary">粘贴分享链接导入</button>
+  </navigator>
 
   <view wx:if="{{status === 'locationRequired'}}" class="location-required">
     <text>需要地点才能按距离展示你的收藏。</text>

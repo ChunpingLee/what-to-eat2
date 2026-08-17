@@ -26,6 +26,11 @@ export interface FavoriteBatchResult {
   failed: Array<{ poiId: string; code: string }>
 }
 
+export type LinkImportResult =
+  | { status: 'matched'; candidates: Place[] }
+  | { status: 'search'; keywords: string }
+  | { status: 'manual' }
+
 export async function searchPlaces(query: {
   keywords: string
   center: GeoPoint
@@ -43,6 +48,18 @@ export async function addFavoriteBatch(poiIds: string[]): Promise<FavoriteBatchR
   const response = await wx.cloud.callFunction<FavoriteBatchResult>({
     name: 'favorites',
     data: { action: 'addBatch', poiIds },
+  })
+  return response.result
+}
+
+export async function importSharedLink(input: {
+  url: string
+  center?: GeoPoint
+  city?: string
+}): Promise<LinkImportResult> {
+  const response = await wx.cloud.callFunction<LinkImportResult>({
+    name: 'link-import',
+    data: input,
   })
   return response.result
 }

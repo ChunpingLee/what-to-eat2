@@ -1,5 +1,5 @@
 {
-  "pages": ["pages/home/index", "pages/place-search/index", "pages/recommend/index"],
+  "pages": ["pages/home/index", "pages/import/index", "pages/place-search/index", "pages/recommend/index"],
   "window": {
     "navigationBarTitleText": "最想吃啥",
     "navigationBarBackgroundColor": "#ffffff",

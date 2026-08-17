@@ -1,0 +1,25 @@
+<view class="page">
+  <view class="title">导入分享链接</view>
+  <view class="hint">支持美团、大众点评和高德地图的 HTTPS 分享链接。</view>
+  <input class="input" placeholder="粘贴餐厅分享链接" value="{{url}}" bindinput="onUrlInput" />
+  <input class="input" placeholder="城市（可选，有助于匹配分店）" value="{{city}}" bindinput="onCityInput" />
+  <button class="primary" loading="{{status === 'importing'}}" disabled="{{status === 'importing'}}" bindtap="onImport">解析链接</button>
+
+  <view wx:if="{{status === 'error'}}" class="error">{{errorMessage}}</view>
+
+  <view wx:if="{{status === 'search'}}" class="result">
+    <view class="hint">已提取餐厅名称，请在搜索页确认分店。</view>
+    <navigator url="{{searchUrl}}"><button class="primary">搜索“{{keywords}}”</button></navigator>
+  </view>
+
+  <view wx:if="{{status === 'manual'}}" class="result">
+    <view class="hint">未能从页面提取餐厅名称，请手动搜索。</view>
+    <navigator url="/pages/place-search/index"><button class="secondary">前往手动搜索</button></navigator>
+  </view>
+
+  <view wx:if="{{status === 'matched'}}" class="result">
+    <view class="hint">请选择要加入的分店。</view>
+    <branch-picker items="{{branches}}" selected-poi-ids="{{selectedPoiIds}}" bind:change="onSelectionChange" />
+    <button class="primary" disabled="{{selectedPoiIds.length === 0 || submitting}}" loading="{{submitting}}" bindtap="onAddSelected">加入已选分店（{{selectedPoiIds.length}}）</button>
+  </view>
+</view>

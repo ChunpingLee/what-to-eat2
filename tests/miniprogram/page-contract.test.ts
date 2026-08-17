@@ -60,3 +60,22 @@ it('renders precomputed branch selection instead of invoking array methods in WX
   expect(picker).toContain('item.selected')
   expect(picker).not.toMatch(/selectedPoiIds\s*\./)
 })
+
+it('registers the safe link import page and keeps it reachable before location permission', () => {
+  const appConfig = JSON.parse(read('miniprogram/app.json')) as { pages: string[] }
+  const home = read('miniprogram/pages/home/index.wxml')
+  const beforeLocationBranch = home.slice(0, home.indexOf("status === 'locationRequired'"))
+
+  expect(appConfig.pages).toContain('pages/import/index')
+  expect(beforeLocationBranch).toContain('url="/pages/import/index"')
+  expect(read('miniprogram/pages/import/index.wxml')).toContain('branch-picker')
+})
+
+it('calls only the link-import cloud function from the import client and supports search fallback navigation', () => {
+  const cloud = read('miniprogram/services/cloud.ts')
+  const page = read('miniprogram/pages/import/index.wxml')
+
+  expect(cloud).toContain("name: 'link-import'")
+  expect(page).toContain('url="{{searchUrl}}"')
+  expect(page).toContain('url="/pages/place-search/index"')
+})

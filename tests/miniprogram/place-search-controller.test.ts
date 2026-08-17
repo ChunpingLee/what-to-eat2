@@ -1,10 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createPlaceSearchController } from '../../miniprogram/pages/place-search/index'
+import { createPlaceSearchController, searchPrefill } from '../../miniprogram/pages/place-search/index'
 
 const center = { latitude: 31.23, longitude: 121.47 }
 const query = { keywords: '连锁店', city: '上海', center, radiusMeters: 5_000 }
 
 describe('place search controller', () => {
+  it('prefills decoded link-import keywords and city without trusting non-string query values', () => {
+    expect(searchPrefill({ keywords: '%E7%A4%BA%E4%BE%8B%E7%81%AB%E9%94%85', city: '%E4%B8%8A%E6%B5%B7' }))
+      .toEqual({ keywords: '示例火锅', city: '上海' })
+    expect(searchPrefill({ keywords: '100%火锅', city: '上海' })).toEqual({ keywords: '100%火锅', city: '上海' })
+    expect(searchPrefill({ keywords: ['unexpected'], city: undefined })).toEqual({ keywords: '', city: '' })
+  })
+
   it('marks historical favorites as existing before they can be selected', async () => {
     const listFavorites = vi.fn().mockResolvedValue([{ poiId: 'old', name: '旧分店', location: center }])
     const searchPlaces = vi.fn().mockResolvedValue({
