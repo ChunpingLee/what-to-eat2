@@ -1,0 +1,7 @@
+{
+  "favorites": { ".read": "doc._openid == auth.openid", ".write": "doc._openid == auth.openid" },
+  "imports": { ".read": "doc._openid == auth.openid", ".write": "doc._openid == auth.openid" },
+  "recommendation_events": { ".read": "doc._openid == auth.openid", ".write": "doc._openid == auth.openid" },
+  "places": { ".read": true, ".write": false },
+  "users": { ".read": "doc._openid == auth.openid", ".write": "doc._openid == auth.openid" }
+}
