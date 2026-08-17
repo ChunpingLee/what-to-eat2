@@ -16,6 +16,7 @@
     "parsers/**/*.ts",
     "../place-search/amap-client.ts",
     "../place-search/cache.ts",
+    "../shared/public-places.ts",
     "../../src/domain/favorites.ts",
     "../../src/domain/geo.ts",
     "../../src/shared/types.ts",

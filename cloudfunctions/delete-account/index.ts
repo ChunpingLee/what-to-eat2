@@ -1,3 +1,8 @@
+import {
+  accountDocumentId,
+  type AccountTransaction,
+} from '../shared/account-state'
+
 export const PERSONAL_COLLECTIONS = [
   'favorites',
   'imports',
@@ -6,13 +11,17 @@ export const PERSONAL_COLLECTIONS = [
 ] as const
 
 export type PersonalCollection = typeof PERSONAL_COLLECTIONS[number]
+export const PERSONAL_DATA_COLLECTIONS = ['favorites', 'imports', 'recommendation_events'] as const
+export type PersonalDataCollection = typeof PERSONAL_DATA_COLLECTIONS[number]
 
 export interface DeleteOwnedResult {
   deleted: Partial<Record<PersonalCollection, number>>
 }
 
 export interface DeleteAccountRepository {
-  deleteOwned(openid: string, collections: readonly PersonalCollection[]): Promise<DeleteOwnedResult>
+  beginDeletion(openid: string): Promise<void>
+  deleteOwned(openid: string, collections: readonly PersonalDataCollection[]): Promise<DeleteOwnedResult>
+  finishDeletion(openid: string): Promise<number>
 }
 
 interface CloudBaseQuery {
@@ -26,6 +35,7 @@ interface CloudBaseCollection {
 
 export interface CloudBaseDeleteDatabase {
   collection(name: PersonalCollection): CloudBaseCollection
+  runTransaction<T>(callback: (transaction: AccountTransaction) => Promise<T>): Promise<T>
 }
 
 interface CloudBaseSdk {
@@ -64,14 +74,27 @@ async function inBatches<T>(values: T[], concurrency: number, task: (value: T) =
  */
 export function createCloudBaseDeleteRepository(
   database: CloudBaseDeleteDatabase,
-  options: { pageSize?: number; deleteConcurrency?: number } = {},
+  options: { pageSize?: number; deleteConcurrency?: number; now?: () => Date } = {},
 ): DeleteAccountRepository {
   const pageSize = options.pageSize ?? 100
   const deleteConcurrency = options.deleteConcurrency ?? 20
+  const now = options.now ?? (() => new Date())
   if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new Error('INVALID_DELETE_PAGE_SIZE')
   if (!Number.isInteger(deleteConcurrency) || deleteConcurrency < 1) throw new Error('INVALID_DELETE_CONCURRENCY')
 
   return {
+    async beginDeletion(openid) {
+      await database.runTransaction(async transaction => {
+        const id = accountDocumentId(openid)
+        const account = transaction.collection('users').doc(id)
+        const result = await account.get()
+        const state = result.data[0] as { status?: unknown } | undefined
+        if (state?.status === 'deleting') return
+        await account.set({ data: {
+          _id: id, _openid: openid, status: 'deleting', updatedAt: now().toISOString(),
+        } })
+      })
+    },
     async deleteOwned(openid, collections) {
       const deleted: Partial<Record<PersonalCollection, number>> = {}
       for (const name of collections) {
@@ -90,6 +113,17 @@ export function createCloudBaseDeleteRepository(
       }
       return { deleted }
     },
+    async finishDeletion(openid) {
+      return database.runTransaction(async transaction => {
+        const account = transaction.collection('users').doc(accountDocumentId(openid))
+        const result = await account.get()
+        const state = result.data[0] as { status?: unknown } | undefined
+        if (!state) return 0
+        if (state.status !== 'deleting') throw new Error('ACCOUNT_DELETE_STATE_CHANGED')
+        await account.remove()
+        return 1
+      })
+    },
   }
 }
 
@@ -97,7 +131,10 @@ export function createDeleteHandler(deps: { getOpenId(): string | undefined; rep
   return async (_event?: unknown) => {
     const openid = deps.getOpenId()
     if (!openid) throw new Error('UNAUTHENTICATED')
-    return deps.repo.deleteOwned(openid, PERSONAL_COLLECTIONS)
+    await deps.repo.beginDeletion(openid)
+    const result = await deps.repo.deleteOwned(openid, PERSONAL_DATA_COLLECTIONS)
+    const users = await deps.repo.finishDeletion(openid)
+    return { deleted: { ...result.deleted, users } }
   }
 }
 

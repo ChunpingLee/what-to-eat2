@@ -3,6 +3,9 @@ import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { createFavoritesHandler, main } from '../../cloudfunctions/favorites/index'
 import { createCloudBaseFavoritesRepository } from '../../cloudfunctions/favorites/repository'
+import { publicPlaceDocumentId } from '../../cloudfunctions/shared/public-places'
+import { createHomeController } from '../../miniprogram/pages/home/controller'
+import { accountDocumentId } from '../../cloudfunctions/shared/account-state'
 
 describe('favorites cloud function', () => {
   it('provides CloudBase\'s root index handler module', () => {
@@ -23,14 +26,14 @@ describe('favorites cloud function', () => {
 
   it('uses trusted context and ignores a forged owner', async () => {
     const repo = {
-      list: vi.fn().mockResolvedValue([]),
+      list: vi.fn().mockResolvedValue({ items: [], unresolved: [] }),
       findExisting: vi.fn(),
       insert: vi.fn(),
       remove: vi.fn(),
     }
     const handler = createFavoritesHandler({ getOpenId: () => 'trusted-user', repo })
 
-    await expect(handler({ action: 'list', openid: 'attacker' } as never)).resolves.toEqual({ items: [] })
+    await expect(handler({ action: 'list', openid: 'attacker' } as never)).resolves.toEqual({ items: [], unresolved: [] })
     expect(repo.list).toHaveBeenCalledWith('trusted-user')
   })
 
@@ -44,7 +47,7 @@ describe('favorites cloud function', () => {
       getCloudbaseContext: vi.fn().mockReturnValue({ OPENID: 'context-user' }),
     }
 
-    await expect(main({ action: 'list' }, { requestId: 'request-1' }, sdk as never)).resolves.toEqual({ items: [] })
+    await expect(main({ action: 'list' }, { requestId: 'request-1' }, sdk as never)).resolves.toEqual({ items: [], unresolved: [] })
     expect(sdk.getCloudbaseContext).toHaveBeenCalledWith({ requestId: 'request-1' })
     expect(where).toHaveBeenCalledWith({ _openid: 'context-user' })
   })
@@ -69,36 +72,25 @@ describe('favorites cloud function', () => {
   })
 
   it('queries existing favorites by owner and poiId before inserting', async () => {
-    const where = vi.fn().mockReturnThis()
-    const get = vi.fn().mockResolvedValue({ data: [{ poiId: 'p2' }] })
-    const add = vi.fn().mockResolvedValue(undefined)
-    const collection = vi.fn().mockReturnValue({ where, get, add })
-    const repo = createCloudBaseFavoritesRepository({ collection })
+    const database = transactionalFavoritesDatabase()
+    database.records.favorites.set('existing', { _id: 'existing', poiId: 'p2', _openid: 'u1' })
+    const repo = createCloudBaseFavoritesRepository(database as never, ids => ({ $in: ids }), () => new Date(0))
 
     await expect(repo.findExisting('u1', ['p1', 'p2'])).resolves.toEqual(new Set(['p2']))
-    await repo.insert('u1', ['p1'])
+    await expect(repo.insert('u1', ['p1'])).resolves.toMatchObject({ created: ['p1'] })
 
-    expect(where).toHaveBeenCalledWith({ _openid: 'u1', poiId: { $in: ['p1', 'p2'] } })
-    expect(add).toHaveBeenCalledWith({
-      data: { _id: '5a703d644abc1f2d890a19dc6090521e39ca583e7bd98ca41a896d974188f278', poiId: 'p1', _openid: 'u1' },
+    expect([...database.records.favorites.values()]).toContainEqual({
+      _id: '5a703d644abc1f2d890a19dc6090521e39ca583e7bd98ca41a896d974188f278',
+      poiId: 'p1', _openid: 'u1', createdAt: new Date(0).toISOString(),
     })
+    expect([...database.records.users.values()]).toContainEqual(expect.objectContaining({
+      _openid: 'u1', status: 'active',
+    }))
   })
 
   it('atomically classifies one of two concurrent additions as existing', async () => {
-    const records = new Map<string, { _id: string; poiId: string; _openid: string }>()
-    const collection = () => ({
-      where: (query: Record<string, unknown>) => ({
-        get: async () => ({
-          data: [...records.values()].filter(record => record._openid === query._openid && (record.poiId === query.poiId || record._id === query._id)),
-        }),
-        remove: async () => undefined,
-      }),
-      add: async ({ data }: { data: { _id: string; poiId: string; _openid: string } }) => {
-        if (records.has(data._id)) throw { code: 'DATABASE_DUPLICATE_WRITE' }
-        records.set(data._id, data)
-      },
-    })
-    const repo = createCloudBaseFavoritesRepository({ collection } as never)
+    const database = transactionalFavoritesDatabase()
+    const repo = createCloudBaseFavoritesRepository(database as never)
     const handler = createFavoritesHandler({ getOpenId: () => 'u1', repo })
 
     const results = await Promise.all([
@@ -106,40 +98,133 @@ describe('favorites cloud function', () => {
       handler({ action: 'addBatch', poiIds: ['p1'] }),
     ])
 
-    expect(records.size).toBe(1)
+    expect(database.records.favorites.size).toBe(1)
     expect(results.flatMap(result => result.created)).toEqual(['p1'])
     expect(results.flatMap(result => result.existing)).toEqual(['p1'])
   })
 
-  it('does not classify another unique-key conflict as an existing favorite', async () => {
-    const collection = () => ({
-      where: () => ({ get: async () => ({ data: [] }), remove: async () => undefined }),
-      add: async () => { throw { code: 'DATABASE_DUPLICATE_WRITE' } },
-    })
-    const repo = createCloudBaseFavoritesRepository({ collection } as never)
-
-    await expect(repo.insert('u1', ['p1'])).resolves.toEqual({
-      created: [], existing: [], failed: [{ poiId: 'p1', code: 'DATABASE_DUPLICATE_WRITE' }],
-    })
-  })
-
   it('returns partial batch results without rolling back successful writes', async () => {
-    const records = new Map<string, { _id: string; poiId: string; _openid: string }>()
-    const collection = () => ({
-      where: (query: Record<string, unknown>) => ({
-        get: async () => ({ data: [...records.values()].filter(record => record._id === query._id && record._openid === query._openid && record.poiId === query.poiId) }),
-        remove: async () => undefined,
-      }),
-      add: async ({ data }: { data: { _id: string; poiId: string; _openid: string } }) => {
-        if (data.poiId === 'existing') { records.set(data._id, data); throw { code: 'DATABASE_DUPLICATE_WRITE' } }
-        if (data.poiId === 'denied') throw { code: 'DATABASE_PERMISSION_DENIED' }
-        records.set(data._id, data)
-      },
-    })
-    const handler = createFavoritesHandler({ getOpenId: () => 'u1', repo: createCloudBaseFavoritesRepository({ collection } as never) })
+    const database = transactionalFavoritesDatabase('denied')
+    const repo = createCloudBaseFavoritesRepository(database as never)
+    await repo.insert('u1', ['existing'])
+    const handler = createFavoritesHandler({ getOpenId: () => 'u1', repo })
 
     await expect(handler({ action: 'addBatch', poiIds: ['created', 'existing', 'denied'] })).resolves.toEqual({
       created: ['created'], existing: ['existing'], duplicateSelections: [], failed: [{ poiId: 'denied', code: 'DATABASE_PERMISSION_DENIED' }],
     })
   })
+
+  it('resolves favorite records to ordered public places that home can distance-sort', async () => {
+    const near = { poiId: 'near', name: '近店', location: { latitude: 31.231, longitude: 121.47 } }
+    const far = { poiId: 'far', name: '远店', location: { latitude: 31.24, longitude: 121.47 } }
+    const favorites = [
+      { poiId: 'far', _openid: 'u1', createdAt: '2026-08-17T00:00:00.000Z' },
+      { poiId: 'near', _openid: 'u1', createdAt: '2026-08-17T00:01:00.000Z' },
+    ]
+    const places = new Map([
+      [publicPlaceDocumentId('near'), near], [publicPlaceDocumentId('far'), far],
+    ])
+    const repo = createCloudBaseFavoritesRepository(favoriteReadDatabase(favorites, places) as never)
+
+    await expect(repo.list('u1')).resolves.toEqual({ items: [far, near], unresolved: [] })
+    const home = createHomeController({ listFavorites: async () => (await repo.list('u1')).items })
+    await expect(home.load({ latitude: 31.23, longitude: 121.47 }, 5_000)).resolves.toMatchObject({
+      status: 'ready', items: [{ place: near }, { place: far }],
+    })
+  })
+
+  it('skips missing public POIs and reports their ids as unresolved', async () => {
+    const found = { poiId: 'found', name: '已解析', location: { latitude: 31.23, longitude: 121.47 } }
+    const favorites = [
+      { poiId: 'missing', _openid: 'u1', createdAt: '2026-08-17T00:00:00.000Z' },
+      { poiId: 'found', _openid: 'u1', createdAt: '2026-08-17T00:01:00.000Z' },
+    ]
+    const places = new Map([[publicPlaceDocumentId('found'), found]])
+    const repo = createCloudBaseFavoritesRepository(favoriteReadDatabase(favorites, places) as never)
+
+    await expect(repo.list('u1')).resolves.toEqual({ items: [found], unresolved: ['missing'] })
+  })
+
+  it('rejects add and remove writes when the trusted account state is deleting', async () => {
+    const userId = accountDocumentId('u1')
+    const database = {
+      runTransaction: vi.fn(async (callback: (transaction: unknown) => Promise<unknown>) => callback({
+        collection: (name: string) => ({
+          doc: (id: string) => ({
+            get: async () => ({ data: name === 'users' && id === userId
+              ? [{ _id: userId, _openid: 'u1', status: 'deleting' }] : [] }),
+            set: vi.fn(), remove: vi.fn(),
+          }),
+        }),
+      })),
+      collection: () => ({
+        where: () => ({ get: async () => ({ data: [] }), remove: vi.fn() }),
+        add: vi.fn(),
+        doc: () => ({ get: async () => ({ data: [] }) }),
+      }),
+    }
+    const repo = createCloudBaseFavoritesRepository(database as never)
+
+    await expect(repo.insert('u1', ['p1'])).rejects.toMatchObject({ code: 'ACCOUNT_DELETING' })
+    await expect(repo.remove('u1', 'p1')).rejects.toMatchObject({ code: 'ACCOUNT_DELETING' })
+  })
 })
+
+function favoriteReadDatabase(
+  favorites: Array<{ poiId: string; _openid: string; createdAt: string }>,
+  places: Map<string, object>,
+) {
+  return {
+    collection(name: string) {
+      if (name === 'favorites') return {
+        where: () => ({ get: async () => ({ data: favorites }) }),
+      }
+      return {
+        doc: (id: string) => ({ get: async () => ({ data: places.has(id) ? [places.get(id)] : [] }) }),
+      }
+    },
+  }
+}
+
+function transactionalFavoritesDatabase(failingPoiId?: string) {
+  const records = {
+    favorites: new Map<string, Record<string, unknown>>(),
+    users: new Map<string, Record<string, unknown>>(),
+    places: new Map<string, Record<string, unknown>>(),
+  }
+  let transactionQueue: Promise<unknown> = Promise.resolve()
+  const transactionCollection = (name: keyof typeof records) => ({
+    doc: (id: string) => ({
+      get: async () => ({ data: records[name].has(id) ? [records[name].get(id)] : [] }),
+      set: async ({ data }: { data: Record<string, unknown> }) => {
+        if (name === 'favorites' && data.poiId === failingPoiId) throw { code: 'DATABASE_PERMISSION_DENIED' }
+        records[name].set(id, data)
+      },
+      remove: async () => { records[name].delete(id) },
+    }),
+  })
+  return {
+    records,
+    runTransaction<T>(callback: (transaction: { collection(name: keyof typeof records): ReturnType<typeof transactionCollection> }) => Promise<T>) {
+      const operation = transactionQueue.then(() => callback({ collection: transactionCollection }))
+      transactionQueue = operation.then(() => undefined, () => undefined)
+      return operation
+    },
+    collection(name: keyof typeof records) {
+      return {
+        where(query: Record<string, unknown>) {
+          return {
+            async get() {
+              const included = query.poiId && typeof query.poiId === 'object' && '$in' in (query.poiId as object)
+                ? (query.poiId as { $in: string[] }).$in : undefined
+              return { data: [...records[name].values()].filter(record =>
+                (!query._openid || record._openid === query._openid)
+                && (!query.poiId || included?.includes(record.poiId as string) || record.poiId === query.poiId)) }
+            },
+          }
+        },
+        doc(id: string) { return transactionCollection(name).doc(id) },
+      }
+    },
+  }
+}

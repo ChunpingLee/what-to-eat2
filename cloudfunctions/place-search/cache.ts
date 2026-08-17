@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import type { Place } from '../../src/domain/favorites'
 import { SafeError, safePlaceSearchError } from '../../src/shared/errors'
 import type { PlaceSearchClient, PlaceSearchQuery } from './amap-client'
+import type { PublicPlaceStore } from '../shared/public-places'
 
 export interface PlaceSearchResult { items: Place[]; sourceUpdatedAt: string; stale: boolean }
 export interface CachedPlaceSearch { key: string; cachedAt: number; result: Omit<PlaceSearchResult, 'stale'> }
@@ -42,7 +43,15 @@ function validate(query: PlaceSearchQuery) {
   }
 }
 
-export function createPlaceSearchService(deps: { client: PlaceSearchClient; cache: PlaceSearchCache; now?: () => number }) {
+export interface PlacePersistenceWarning { code: 'PUBLIC_PLACE_PERSIST_FAILED'; failedCount: number }
+
+export function createPlaceSearchService(deps: {
+  client: PlaceSearchClient
+  cache: PlaceSearchCache
+  places?: Pick<PublicPlaceStore, 'upsertMany'>
+  onPlacePersistenceWarning?(warning: PlacePersistenceWarning): void
+  now?: () => number
+}) {
   const now = deps.now ?? Date.now
   return {
     async searchPlaces(query: PlaceSearchQuery): Promise<PlaceSearchResult> {
@@ -60,6 +69,19 @@ export function createPlaceSearchService(deps: { client: PlaceSearchClient; cach
         })
         const result = { items, sourceUpdatedAt: new Date(currentTime).toISOString() }
         await deps.cache.set({ key, cachedAt: currentTime, result })
+        if (deps.places) {
+          try {
+            await deps.places.upsertMany(items, result.sourceUpdatedAt)
+          } catch (error) {
+            const failedCount = typeof error === 'object' && error !== null && 'failedCount' in error
+              && typeof (error as { failedCount?: unknown }).failedCount === 'number'
+              ? (error as { failedCount: number }).failedCount
+              : items.length
+            const warning = { code: 'PUBLIC_PLACE_PERSIST_FAILED' as const, failedCount }
+            if (deps.onPlacePersistenceWarning) deps.onPlacePersistenceWarning(warning)
+            else console.error(warning)
+          }
+        }
         return { ...result, stale: false }
       } catch (error) {
         if (error instanceof SafeError && error.code === 'AMAP_TIMEOUT'

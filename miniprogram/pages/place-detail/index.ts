@@ -1,6 +1,7 @@
 import type { Place } from '../../../src/domain/favorites'
 import type { FavoriteBatchResult } from '../../services/cloud'
 import { addFavoriteBatch, resolveSharedPlace } from '../../services/cloud'
+import { buildShareDetailPath, validateSharePoiId } from '../../../src/domain/share'
 
 export interface ShareOptions { v: 1; poiId: string }
 
@@ -9,12 +10,11 @@ export function parseShareOptions(options: Record<string, unknown>): ShareOption
   if (typeof options.poiId !== 'string' || !options.poiId) throw new Error('INVALID_SHARE_PAYLOAD')
   let poiId: string
   try { poiId = decodeURIComponent(options.poiId).trim() } catch { throw new Error('INVALID_SHARE_PAYLOAD') }
-  if (!poiId || poiId.length > 128) throw new Error('INVALID_SHARE_PAYLOAD')
-  return { v: 1, poiId }
+  return { v: 1, poiId: validateSharePoiId(poiId) }
 }
 
 export function sharePathFor(poiId: string) {
-  return `/pages/place-detail/index?v=1&poiId=${encodeURIComponent(poiId)}`
+  return buildShareDetailPath(poiId)
 }
 
 export function createPlaceDetailController(api: {

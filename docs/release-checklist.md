@@ -23,6 +23,8 @@
 - [ ] 在管理端逐一确认实际集合：`favorites`、`imports`、`recommendation_events`、`users`、`places`、`amap_route_rate_limits`、`place_search_cache`。
 - [ ] 确认 `favorites/imports/recommendation_events/users` 客户端只能读当前 OpenID 且不能直写；`places` 只读；两个高德内部集合客户端不可读写。
 - [ ] 确认索引覆盖 `favorites(_openid, poiId)`、四个个人集合的 `_openid`、`places(poiId)` 以及缓存/限流文档主键。
+- [ ] 确认高德 POI 搜索成功后使用 `sha256(poiId)` 确定性文档 ID 以管理端权限 upsert 公共 `places`，字段只有标准化公开 POI 与 `sourceUpdatedAt`；落库失败不阻断搜索但有不含 POI/密钥的安全告警。
+- [ ] 实测“`place-search` 命中高德 → `places` 落库 → `share-place` 按同一确定性 ID 回读”，分享详情不依赖人工预置 POI。
 - [ ] 在真实 CloudBase 生产 SDK 上验证 `runTransaction` 的路线配额预留：至少两个函数实例并发请求，核对 `amap_route_rate_limits` 时间槽不重叠，不得仅依赖本地交易 mock。
 - [ ] 重复执行 rules 部署脚本，确认预创建和规则下发幂等。
 
@@ -58,13 +60,16 @@
 - [ ] 准备两个真实微信测试账号 A/B；反复执行列表、加入、删除、导入、推荐反馈、分享，A/B 始终互不可见、互不可写。
 - [ ] 从客户端伪造 `openid`、`owner`、`_openid` 和其他账号 POI 参数，确认云函数只信任 CloudBase context OpenID。
 - [ ] 使用账号 A 在设置页点击注销，在二次确认弹窗选择取消；数据不变。
-- [ ] 为账号 A 准备超过 100 条的个人记录，确认注销分页删除 `favorites/imports/recommendation_events/users`，不删 `places` 或账号 B 任何数据。
+- [ ] 为账号 A 准备超过 100 条的个人记录，确认注销分页删除 `favorites/imports/recommendation_events`，确认全空后最后删除确定性 `users` 状态文档，不删 `places` 或账号 B 任何数据。
+- [ ] 并发验证注销锁：`delete-account` 先以真实 CloudBase 事务将确定性 `users` 文档置 `deleting`；收藏 add/remove 在同一用户文档事务中冲突/重试并拒绝新写入；最终空页后仍不能写入，清扫完成才删除状态文档。
+- [ ] 确认注销完成后的新收藏请求按明确策略创建新 `active` 账号，不复活任何旧数据。
 - [ ] 在中途人为注入一次删除失败，确认显示可重试错误；再次注销可幂等删完剩余记录。
 - [ ] 注销后 A 回到空白首页，B 的数据和公共 POI 仍完整；重新进入的 A 按新用户处理。
 
 ## 隐私、密钥与提审材料
 
-- [ ] 小程序后台“用户隐私保护指引”与 `miniprogram/privacy.json`/`app.json` 一致覆盖：定位、收藏、用户粘贴的导入链接、推荐反馈；说明用途、保留和注销删除。
+- [ ] 在微信小程序后台完成官方“用户隐私保护指引”并逐项覆盖：定位、收藏、用户粘贴的导入链接、推荐反馈；说明用途、保留和注销删除。该项只能在后台实际提交后勾选。
+- [ ] `docs/privacy-data-inventory.json` 仅用作内部数据台账，已与后台声明核对；不将它当作微信平台配置或后台声明完成证据。`app.json` 只保留微信支持的 `permission`/`requiredPrivateInfos` 字段。
 - [ ] 隐私声明不宣称抓取榜单、读取第三方账号收藏或保存第三方密码/Cookie；不宣称保存持续位置轨迹。
 - [ ] 对源码、Git 历史、所有云函数 `dist`、微信上传包和 DevTools Network 执行密钥扫描；无高德 Key、腾讯云 SecretId/SecretKey、OpenID、私密备注、清单或原始导入记录。
 - [ ] 检查 `.gitignore` 包含 `node_modules/`，提交和微信上传包不包含任何 `node_modules` 目录。

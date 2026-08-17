@@ -1,15 +1,17 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DeleteAccountPartialFailure = exports.PERSONAL_COLLECTIONS = void 0;
+exports.DeleteAccountPartialFailure = exports.PERSONAL_DATA_COLLECTIONS = exports.PERSONAL_COLLECTIONS = void 0;
 exports.createCloudBaseDeleteRepository = createCloudBaseDeleteRepository;
 exports.createDeleteHandler = createDeleteHandler;
 exports.main = main;
+const account_state_1 = require("../shared/account-state");
 exports.PERSONAL_COLLECTIONS = [
     'favorites',
     'imports',
     'recommendation_events',
     'users',
 ];
+exports.PERSONAL_DATA_COLLECTIONS = ['favorites', 'imports', 'recommendation_events'];
 class DeleteAccountPartialFailure extends Error {
     collection;
     failedIds;
@@ -41,11 +43,25 @@ async function inBatches(values, concurrency, task) {
 function createCloudBaseDeleteRepository(database, options = {}) {
     const pageSize = options.pageSize ?? 100;
     const deleteConcurrency = options.deleteConcurrency ?? 20;
+    const now = options.now ?? (() => new Date());
     if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100)
         throw new Error('INVALID_DELETE_PAGE_SIZE');
     if (!Number.isInteger(deleteConcurrency) || deleteConcurrency < 1)
         throw new Error('INVALID_DELETE_CONCURRENCY');
     return {
+        async beginDeletion(openid) {
+            await database.runTransaction(async (transaction) => {
+                const id = (0, account_state_1.accountDocumentId)(openid);
+                const account = transaction.collection('users').doc(id);
+                const result = await account.get();
+                const state = result.data[0];
+                if (state?.status === 'deleting')
+                    return;
+                await account.set({ data: {
+                        _id: id, _openid: openid, status: 'deleting', updatedAt: now().toISOString(),
+                    } });
+            });
+        },
         async deleteOwned(openid, collections) {
             const deleted = {};
             for (const name of collections) {
@@ -67,6 +83,19 @@ function createCloudBaseDeleteRepository(database, options = {}) {
             }
             return { deleted };
         },
+        async finishDeletion(openid) {
+            return database.runTransaction(async (transaction) => {
+                const account = transaction.collection('users').doc((0, account_state_1.accountDocumentId)(openid));
+                const result = await account.get();
+                const state = result.data[0];
+                if (!state)
+                    return 0;
+                if (state.status !== 'deleting')
+                    throw new Error('ACCOUNT_DELETE_STATE_CHANGED');
+                await account.remove();
+                return 1;
+            });
+        },
     };
 }
 function createDeleteHandler(deps) {
@@ -74,7 +103,10 @@ function createDeleteHandler(deps) {
         const openid = deps.getOpenId();
         if (!openid)
             throw new Error('UNAUTHENTICATED');
-        return deps.repo.deleteOwned(openid, exports.PERSONAL_COLLECTIONS);
+        await deps.repo.beginDeletion(openid);
+        const result = await deps.repo.deleteOwned(openid, exports.PERSONAL_DATA_COLLECTIONS);
+        const users = await deps.repo.finishDeletion(openid);
+        return { deleted: { ...result.deleted, users } };
     };
 }
 function main(event, context, sdk = require('@cloudbase/node-sdk')) {

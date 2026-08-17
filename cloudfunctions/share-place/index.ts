@@ -1,4 +1,9 @@
 import type { Place } from '../../src/domain/favorites'
+import { validateSharePoiId } from '../../src/domain/share'
+import {
+  createCloudBasePublicPlaceStore,
+  type PublicPlacesDatabase,
+} from '../shared/public-places'
 
 export interface SharePayload {
   v: 1
@@ -9,31 +14,14 @@ export interface PublicPlaceRepository {
   findPublicByPoiId(poiId: string): Promise<unknown>
 }
 
-interface CloudBaseCollection {
-  where(query: { poiId: string }): CloudBaseCollection
-  limit(count: number): CloudBaseCollection
-  get(): Promise<{ data: unknown[] }>
-}
-
-interface CloudBaseDatabase {
-  collection(name: 'places'): CloudBaseCollection
-}
-
 interface CloudBaseSdk {
   SYMBOL_CURRENT_ENV: unknown
-  init(options: { env: unknown }): { database(): CloudBaseDatabase }
-}
-
-const MAX_POI_ID_LENGTH = 128
-
-function validPoiId(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0 && value.length <= MAX_POI_ID_LENGTH
+  init(options: { env: unknown }): { database(): PublicPlacesDatabase }
 }
 
 /** Builds the complete data payload allowed to leave one user's private list. */
 export function createSharePayload(input: { poiId: string }): SharePayload {
-  if (!validPoiId(input?.poiId)) throw new Error('INVALID_SHARE_PAYLOAD')
-  return { v: 1, poiId: input.poiId.trim() }
+  return { v: 1, poiId: validateSharePoiId(input?.poiId) }
 }
 
 function optionalText(record: Record<string, unknown>, key: string) {
@@ -56,14 +44,14 @@ function publicPlace(value: unknown): Place | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
   const record = value as Record<string, unknown>
   const location = record.location
-  if (!validPoiId(record.poiId) || typeof record.name !== 'string'
+  if (typeof record.poiId !== 'string' || typeof record.name !== 'string'
     || typeof location !== 'object' || location === null || Array.isArray(location)) return undefined
   const point = location as Record<string, unknown>
   if (typeof point.latitude !== 'number' || !Number.isFinite(point.latitude)
     || typeof point.longitude !== 'number' || !Number.isFinite(point.longitude)) return undefined
 
   const projected: Place = {
-    poiId: record.poiId.trim(),
+    poiId: validateSharePoiId(record.poiId),
     name: record.name,
     location: { latitude: point.latitude, longitude: point.longitude },
   }
@@ -88,19 +76,11 @@ function publicPlace(value: unknown): Place | undefined {
   }
 }
 
-export function createCloudBasePublicPlaceRepository(database: CloudBaseDatabase): PublicPlaceRepository {
-  return {
-    async findPublicByPoiId(poiId) {
-      const result = await database.collection('places').where({ poiId }).limit(1).get()
-      return result.data[0]
-    },
-  }
-}
-
 export function createSharePlaceHandler(deps: { repo: PublicPlaceRepository }) {
   return async (event: SharePayload) => {
-    if (event?.v !== 1 || !validPoiId(event.poiId)) throw new Error('INVALID_SHARE_PAYLOAD')
-    const place = publicPlace(await deps.repo.findPublicByPoiId(event.poiId.trim()))
+    if (event?.v !== 1) throw new Error('INVALID_SHARE_PAYLOAD')
+    const poiId = validateSharePoiId(event.poiId)
+    const place = publicPlace(await deps.repo.findPublicByPoiId(poiId))
     if (!place) throw new Error('PLACE_NOT_FOUND')
     return { place }
   }
@@ -112,5 +92,5 @@ export function main(
   sdk: CloudBaseSdk = require('@cloudbase/node-sdk') as CloudBaseSdk,
 ) {
   const app = sdk.init({ env: sdk.SYMBOL_CURRENT_ENV })
-  return createSharePlaceHandler({ repo: createCloudBasePublicPlaceRepository(app.database()) })(event)
+  return createSharePlaceHandler({ repo: createCloudBasePublicPlaceStore(app.database()) })(event)
 }

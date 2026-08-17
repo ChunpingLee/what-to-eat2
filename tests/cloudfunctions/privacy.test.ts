@@ -4,16 +4,23 @@ import { describe, expect, it, vi } from 'vitest'
 import { createSharePayload, createSharePlaceHandler, main as shareMain } from '../../cloudfunctions/share-place/index'
 import {
   PERSONAL_COLLECTIONS,
+  PERSONAL_DATA_COLLECTIONS,
   createCloudBaseDeleteRepository,
   createDeleteHandler,
   main as deleteMain,
 } from '../../cloudfunctions/delete-account/index'
+import { createCloudBaseFavoritesRepository } from '../../cloudfunctions/favorites/repository'
+import { publicPlaceDocumentId } from '../../cloudfunctions/shared/public-places'
 import {
   createPlaceDetailController,
   parseShareOptions,
   sharePathFor,
 } from '../../miniprogram/pages/place-detail/index'
 import { createDeleteAccountAction } from '../../miniprogram/pages/settings/index'
+import {
+  SHARE_DETAIL_PATH_MAX_UTF8_BYTES,
+  buildShareDetailPath,
+} from '../../src/domain/share'
 
 describe('private place sharing', () => {
   it('contains only the version and POI id in a share payload', () => {
@@ -52,21 +59,34 @@ describe('private place sharing', () => {
       location: { latitude: 31.23, longitude: 121.47 },
     }
     const get = vi.fn().mockResolvedValue({ data: [place] })
-    const database = { collection: vi.fn().mockReturnValue({ where, limit, get }) }
+    const doc = vi.fn().mockReturnValue({ get })
+    const database = { collection: vi.fn().mockReturnValue({ doc, where, limit, get }) }
     const sdk = { SYMBOL_CURRENT_ENV: Symbol('current'), init: vi.fn().mockReturnValue({ database: () => database }) }
 
     await expect(shareMain({ v: 1, poiId: 'p1' }, {}, sdk as never)).resolves.toEqual({ place })
     expect(database.collection).toHaveBeenCalledTimes(1)
     expect(database.collection).toHaveBeenCalledWith('places')
-    expect(where).toHaveBeenCalledWith({ poiId: 'p1' })
+    expect(doc).toHaveBeenCalledWith(publicPlaceDocumentId('p1'))
+    expect(where).not.toHaveBeenCalled()
   })
 })
 
 describe('share receiver and account settings', () => {
   it('builds a detail share path containing only version and encoded POI id', () => {
-    expect(sharePathFor('poi/1 ?')).toBe('/pages/place-detail/index?v=1&poiId=poi%2F1%20%3F')
-    expect(parseShareOptions({ v: '1', poiId: 'poi%2F1%20%3F', owner: 'victim', note: '私密' }))
-      .toEqual({ v: 1, poiId: 'poi/1 ?' })
+    const poiId = 'poi/1 ?%&#'
+    const expected = '/pages/place-detail/index?v=1&poiId=poi%2F1%20%3F%25%26%23'
+    expect(sharePathFor(poiId)).toBe(expected)
+    expect(buildShareDetailPath(poiId)).toBe(expected)
+    expect(parseShareOptions({ v: '1', poiId: 'poi%2F1%20%3F%25%26%23', owner: 'victim', note: '私密' }))
+      .toEqual({ v: 1, poiId })
+  })
+
+  it('rejects a raw-valid POI id when its encoded UTF-8 share path exceeds the stable limit', () => {
+    expect(SHARE_DETAIL_PATH_MAX_UTF8_BYTES).toBe(512)
+    const longChinesePoiId = '店'.repeat(80)
+
+    expect(() => buildShareDetailPath(longChinesePoiId)).toThrow('INVALID_SHARE_PAYLOAD')
+    expect(() => createSharePayload({ poiId: longChinesePoiId })).toThrow('INVALID_SHARE_PAYLOAD')
   })
 
   it('re-resolves the public POI and adds it only after the receiver taps favorite', async () => {
@@ -121,23 +141,44 @@ describe('share receiver and account settings', () => {
     expect(detail).toContain('bindtap="onAddFavorite"')
     expect(settings).toContain('bindtap="onDeleteAccount"')
   })
+
+  it('keeps the internal privacy inventory out of WeChat platform configuration', () => {
+    expect(existsSync(resolve(process.cwd(), 'miniprogram/privacy.json'))).toBe(false)
+    const inventory = JSON.parse(readFileSync(resolve(process.cwd(), 'docs/privacy-data-inventory.json'), 'utf8')) as {
+      classification?: string
+      platformDeclarationComplete?: boolean
+      dataPractices?: Array<{ data?: string }>
+    }
+    expect(inventory.classification).toBe('INTERNAL_DATA_INVENTORY_NOT_WECHAT_CONFIGURATION')
+    expect(inventory.platformDeclarationComplete).toBe(false)
+    expect(inventory.dataPractices?.map(item => item.data)).toEqual(['位置', '收藏', '导入链接', '推荐反馈'])
+    const app = JSON.parse(readFileSync(resolve(process.cwd(), 'miniprogram/app.json'), 'utf8')) as {
+      requiredPrivateInfos?: string[]
+    }
+    expect(app.requiredPrivateInfos).toEqual(['getLocation', 'chooseLocation'])
+  })
 })
 
 describe('account deletion', () => {
   it('deletes only personal collections owned by the trusted context', async () => {
-    const repo = { deleteOwned: vi.fn().mockResolvedValue({ deleted: {} }) }
+    const repo = {
+      beginDeletion: vi.fn().mockResolvedValue(undefined),
+      deleteOwned: vi.fn().mockResolvedValue({ deleted: {} }),
+      finishDeletion: vi.fn().mockResolvedValue(undefined),
+    }
     const handler = createDeleteHandler({ getOpenId: () => 'u1', repo })
 
     await handler({ owner: 'victim' } as never)
 
-    expect(repo.deleteOwned).toHaveBeenCalledWith('u1', [
-      'favorites', 'imports', 'recommendation_events', 'users',
-    ])
+    expect(repo.beginDeletion).toHaveBeenCalledWith('u1')
+    expect(repo.deleteOwned).toHaveBeenCalledWith('u1', ['favorites', 'imports', 'recommendation_events'])
+    expect(repo.finishDeletion).toHaveBeenCalledWith('u1')
     expect(PERSONAL_COLLECTIONS).not.toContain('places')
+    expect(PERSONAL_DATA_COLLECTIONS).not.toContain('users')
   })
 
   it('refuses deletion without a trusted OpenID', async () => {
-    const repo = { deleteOwned: vi.fn() }
+    const repo = { beginDeletion: vi.fn(), deleteOwned: vi.fn(), finishDeletion: vi.fn() }
     const handler = createDeleteHandler({ getOpenId: () => undefined, repo })
 
     await expect(handler()).rejects.toThrow('UNAUTHENTICATED')
@@ -174,16 +215,37 @@ describe('account deletion', () => {
     })
     const repo = createCloudBaseDeleteRepository(fakeDeleteDatabase(get, remove) as never)
 
-    await expect(repo.deleteOwned('u1', ['favorites', 'users'])).rejects.toMatchObject({
+    await expect(repo.deleteOwned('u1', ['favorites', 'imports'])).rejects.toMatchObject({
       code: 'DELETE_ACCOUNT_PARTIAL_FAILURE', collection: 'favorites', failedIds: ['b'],
     })
     expect(records.find(record => record._id === 'a')?._openid).toBe('deleted')
     expect(records.find(record => record._id === 'other')?._openid).toBe('u2')
 
     failB = false
-    await expect(repo.deleteOwned('u1', ['favorites', 'users'])).resolves.toEqual({
-      deleted: { favorites: 1, users: 0 },
+    await expect(repo.deleteOwned('u1', ['favorites', 'imports'])).resolves.toEqual({
+      deleted: { favorites: 1, imports: 0 },
     })
+  })
+
+  it('locks writes before sweeping, rejects a write after the final empty page, and allows an explicit new account later', async () => {
+    const database = accountLifecycleDatabase()
+    const favorites = createCloudBaseFavoritesRepository(database as never, ids => ({ $in: ids }))
+    const deletion = createCloudBaseDeleteRepository(database as never)
+    await expect(favorites.insert('u1', ['before-delete'])).resolves.toMatchObject({ created: ['before-delete'] })
+
+    await deletion.beginDeletion('u1')
+    await deletion.deleteOwned('u1', PERSONAL_DATA_COLLECTIONS)
+    await expect(favorites.insert('u1', ['after-empty-page'])).rejects.toMatchObject({ code: 'ACCOUNT_DELETING' })
+    await deletion.finishDeletion('u1')
+
+    expect(database.ownerRecords('u1')).toEqual([])
+    await expect(favorites.insert('u1', ['new-account-favorite'])).resolves.toMatchObject({
+      created: ['new-account-favorite'],
+    })
+    expect(database.ownerRecords('u1')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: 'active' }),
+      expect.objectContaining({ poiId: 'new-account-favorite' }),
+    ]))
   })
 
   it('uses CloudBase context in the production entrypoint', async () => {
@@ -218,6 +280,11 @@ function fakeDeleteDatabase(
   remove: (id: string) => Promise<void>,
 ) {
   return {
+    runTransaction: async (callback: (transaction: unknown) => Promise<unknown>) => callback({
+      collection: () => ({
+        doc: () => ({ get: async () => ({ data: [] }), set: async () => undefined, remove: async () => undefined }),
+      }),
+    }),
     collection: vi.fn((name: string) => ({
       where: vi.fn((query: Record<string, unknown>) => ({
         limit: vi.fn(() => ({ get })),
@@ -225,5 +292,44 @@ function fakeDeleteDatabase(
       doc: vi.fn((id: string) => ({ remove: () => remove(id) })),
       name,
     })),
+  }
+}
+
+function accountLifecycleDatabase() {
+  const names = ['favorites', 'imports', 'recommendation_events', 'users', 'places'] as const
+  const records = Object.fromEntries(names.map(name => [name, new Map<string, Record<string, unknown>>()])) as
+    Record<typeof names[number], Map<string, Record<string, unknown>>>
+  let queue: Promise<unknown> = Promise.resolve()
+  const doc = (name: typeof names[number], id: string) => ({
+    get: async () => ({ data: records[name].has(id) ? [records[name].get(id)] : [] }),
+    set: async ({ data }: { data: Record<string, unknown> }) => { records[name].set(id, data) },
+    remove: async () => { records[name].delete(id) },
+  })
+  return {
+    runTransaction<T>(callback: (transaction: { collection(name: typeof names[number]): { doc(id: string): ReturnType<typeof doc> } }) => Promise<T>) {
+      const operation = queue.then(() => callback({ collection: name => ({ doc: id => doc(name, id) }) }))
+      queue = operation.then(() => undefined, () => undefined)
+      return operation
+    },
+    collection(name: typeof names[number]) {
+      return {
+        doc: (id: string) => doc(name, id),
+        where(query: Record<string, unknown>) {
+          const values = () => [...records[name].values()].filter(record => {
+            const inValues = typeof query.poiId === 'object' && query.poiId !== null && '$in' in query.poiId
+              ? (query.poiId as { $in: string[] }).$in : undefined
+            return (!query._openid || record._openid === query._openid)
+              && (!query.poiId || inValues?.includes(record.poiId as string) || record.poiId === query.poiId)
+          })
+          return {
+            get: async () => ({ data: values() }),
+            limit: (count: number) => ({ get: async () => ({ data: values().slice(0, count) }) }),
+          }
+        },
+      }
+    },
+    ownerRecords(openid: string) {
+      return names.flatMap(name => [...records[name].values()].filter(record => record._openid === openid))
+    },
   }
 }

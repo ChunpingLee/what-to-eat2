@@ -1,18 +1,13 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createSharePayload = createSharePayload;
-exports.createCloudBasePublicPlaceRepository = createCloudBasePublicPlaceRepository;
 exports.createSharePlaceHandler = createSharePlaceHandler;
 exports.main = main;
-const MAX_POI_ID_LENGTH = 128;
-function validPoiId(value) {
-    return typeof value === 'string' && value.trim().length > 0 && value.length <= MAX_POI_ID_LENGTH;
-}
+const share_1 = require("../../src/domain/share");
+const public_places_1 = require("../shared/public-places");
 /** Builds the complete data payload allowed to leave one user's private list. */
 function createSharePayload(input) {
-    if (!validPoiId(input?.poiId))
-        throw new Error('INVALID_SHARE_PAYLOAD');
-    return { v: 1, poiId: input.poiId.trim() };
+    return { v: 1, poiId: (0, share_1.validateSharePoiId)(input?.poiId) };
 }
 function optionalText(record, key) {
     const value = record[key];
@@ -32,7 +27,7 @@ function publicPlace(value) {
         return undefined;
     const record = value;
     const location = record.location;
-    if (!validPoiId(record.poiId) || typeof record.name !== 'string'
+    if (typeof record.poiId !== 'string' || typeof record.name !== 'string'
         || typeof location !== 'object' || location === null || Array.isArray(location))
         return undefined;
     const point = location;
@@ -40,7 +35,7 @@ function publicPlace(value) {
         || typeof point.longitude !== 'number' || !Number.isFinite(point.longitude))
         return undefined;
     const projected = {
-        poiId: record.poiId.trim(),
+        poiId: (0, share_1.validateSharePoiId)(record.poiId),
         name: record.name,
         location: { latitude: point.latitude, longitude: point.longitude },
     };
@@ -64,19 +59,12 @@ function publicPlace(value) {
         ...(businessStatus ? { businessStatus } : {}),
     };
 }
-function createCloudBasePublicPlaceRepository(database) {
-    return {
-        async findPublicByPoiId(poiId) {
-            const result = await database.collection('places').where({ poiId }).limit(1).get();
-            return result.data[0];
-        },
-    };
-}
 function createSharePlaceHandler(deps) {
     return async (event) => {
-        if (event?.v !== 1 || !validPoiId(event.poiId))
+        if (event?.v !== 1)
             throw new Error('INVALID_SHARE_PAYLOAD');
-        const place = publicPlace(await deps.repo.findPublicByPoiId(event.poiId.trim()));
+        const poiId = (0, share_1.validateSharePoiId)(event.poiId);
+        const place = publicPlace(await deps.repo.findPublicByPoiId(poiId));
         if (!place)
             throw new Error('PLACE_NOT_FOUND');
         return { place };
@@ -84,5 +72,5 @@ function createSharePlaceHandler(deps) {
 }
 function main(event, _context, sdk = require('@cloudbase/node-sdk')) {
     const app = sdk.init({ env: sdk.SYMBOL_CURRENT_ENV });
-    return createSharePlaceHandler({ repo: createCloudBasePublicPlaceRepository(app.database()) })(event);
+    return createSharePlaceHandler({ repo: (0, public_places_1.createCloudBasePublicPlaceStore)(app.database()) })(event);
 }

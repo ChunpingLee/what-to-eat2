@@ -13,6 +13,8 @@
   "include": [
     "index.ts",
     "repository.ts",
+    "../shared/public-places.ts",
+    "../shared/account-state.ts",
     "../../src/domain/favorites.ts",
     "../../src/domain/geo.ts",
     "../../src/shared/types.ts"

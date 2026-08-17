@@ -10,5 +10,5 @@
     "rootDir": "../..",
     "outDir": "dist"
   },
-  "include": ["index.ts"]
+  "include": ["index.ts", "../shared/account-state.ts"]
 }

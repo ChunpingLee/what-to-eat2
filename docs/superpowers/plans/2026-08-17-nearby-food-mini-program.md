@@ -631,7 +631,7 @@ git commit -m "feat: recommend nearby restaurants by travel time"
 - Create: `miniprogram/pages/place-detail/index.ts`
 - Create: `miniprogram/pages/place-detail/index.wxml`
 - Create: `miniprogram/pages/settings/index.ts`
-- Create: `miniprogram/privacy.json`
+- Create: `docs/privacy-data-inventory.json`
 - Create: `tests/cloudfunctions/privacy.test.ts`
 - Create: `docs/release-checklist.md`
 
@@ -662,7 +662,7 @@ Expected: FAIL，分享和删除处理器不存在。
 
 - [ ] **Step 4: 完成隐私声明和发布检查表**
 
-`privacy.json` 与小程序后台声明必须覆盖位置、收藏、导入链接和推荐反馈用途。`docs/release-checklist.md` 必须列出：CloudBase 生产套餐、数据库规则部署、高德配额与域名、密钥扫描、两个测试账号越权检查、定位拒绝、API 超时、空结果、缓存更新时间、分享接收和账号删除。
+`docs/privacy-data-inventory.json` 仅作内部数据台账，必须明确不是微信平台配置且不代表后台声明已完成。小程序后台“用户隐私保护指引”必须人工覆盖位置、收藏、导入链接和推荐反馈用途。`docs/release-checklist.md` 必须列出：CloudBase 生产套餐、数据库规则部署、高德配额与域名、密钥扫描、两个测试账号越权检查、定位拒绝、API 超时、空结果、缓存更新时间、分享接收和账号删除。
 
 - [ ] **Step 5: 执行最终验证**
 
@@ -673,7 +673,7 @@ Manual: 使用两个微信测试账号验证互不可见；确认客户端包和
 - [ ] **Step 6: 提交**
 
 ```bash
-git add cloudfunctions/share-place cloudfunctions/delete-account miniprogram/pages/place-detail miniprogram/pages/settings miniprogram/privacy.json tests/cloudfunctions/privacy.test.ts docs/release-checklist.md
+git add cloudfunctions/share-place cloudfunctions/delete-account miniprogram/pages/place-detail miniprogram/pages/settings docs/privacy-data-inventory.json tests/cloudfunctions/privacy.test.ts docs/release-checklist.md
 git commit -m "feat: complete private sharing and release controls"
 ```
 

@@ -1,6 +1,6 @@
 {
-  "version": "1",
-  "requiredPrivateInfos": ["getLocation", "chooseLocation"],
+  "classification": "INTERNAL_DATA_INVENTORY_NOT_WECHAT_CONFIGURATION",
+  "platformDeclarationComplete": false,
   "dataPractices": [
     {
       "data": "位置",

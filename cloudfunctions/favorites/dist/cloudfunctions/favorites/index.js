@@ -10,7 +10,7 @@ function createFavoritesHandler(deps) {
         if (!openid)
             throw new Error('UNAUTHENTICATED');
         if (event.action === 'list')
-            return { items: await deps.repo.list(openid) };
+            return deps.repo.list(openid);
         if (event.action === 'remove') {
             await deps.repo.remove(openid, event.poiId);
             return { removed: event.poiId };

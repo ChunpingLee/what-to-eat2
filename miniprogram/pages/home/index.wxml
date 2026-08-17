@@ -29,7 +29,7 @@
     </view>
     <view wx:if="{{status === 'empty'}}" class="hint">这个范围内还没有收藏。</view>
 
-    <navigator wx:for="{{items}}" wx:key="poiId" class="favorite-card" url="/pages/place-detail/index?v=1&amp;poiId={{item.place.poiId}}">
+    <navigator wx:for="{{items}}" wx:key="poiId" class="favorite-card" url="{{item.detailPath}}">
       <view class="name">{{item.place.name}}</view>
       <view class="address">{{item.place.address || ''}}</view>
       <view class="distance">{{item.distanceMeters}} 米</view>

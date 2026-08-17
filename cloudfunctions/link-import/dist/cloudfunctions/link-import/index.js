@@ -8,6 +8,7 @@ const cache_1 = require("../place-search/cache");
 const amap_1 = require("./parsers/amap");
 const dianping_1 = require("./parsers/dianping");
 const meituan_1 = require("./parsers/meituan");
+const public_places_1 = require("../shared/public-places");
 const url_policy_1 = require("./url-policy");
 function parserFor(url) {
     const platform = (0, url_policy_1.platformForUrl)(url);
@@ -76,9 +77,11 @@ async function main(event, _context, sdk = require('@cloudbase/node-sdk')) {
                 return [];
             if (!service) {
                 const cloudbase = sdk.init({ env: sdk.SYMBOL_CURRENT_ENV });
+                const database = cloudbase.database();
                 service = (0, cache_1.createPlaceSearchService)({
                     client: (0, amap_client_1.createAmapClient)(),
-                    cache: (0, cache_1.createCloudBaseSearchCache)(cloudbase.database()),
+                    cache: (0, cache_1.createCloudBaseSearchCache)(database),
+                    places: (0, public_places_1.createCloudBasePublicPlaceStore)(database),
                 });
             }
             return (await service.searchPlaces({ keywords: hint.name, city, center, radiusMeters: 5_000 })).items;

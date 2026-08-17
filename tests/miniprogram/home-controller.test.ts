@@ -31,5 +31,21 @@ it('adds a direct POI id to every favorite card for stable rendering keys', asyn
   const controller = createHomeController(api)
 
   await expect(controller.load({ latitude: 31.23, longitude: 121.47 }, 5_000))
-    .resolves.toMatchObject({ items: [{ poiId: 'near' }] })
+    .resolves.toMatchObject({
+      items: [{ poiId: 'near', detailPath: '/pages/place-detail/index?v=1&poiId=near' }],
+    })
+})
+
+it('pre-encodes the complete detail path instead of exposing a raw POI id to WXML', async () => {
+  const poiId = 'poi/1 ?%&#'
+  const api = {
+    listFavorites: vi.fn().mockResolvedValue([
+      { poiId, name: '特殊分店', location: { latitude: 31.231, longitude: 121.47 } },
+    ]),
+  }
+  const controller = createHomeController(api)
+
+  await expect(controller.load({ latitude: 31.23, longitude: 121.47 }, 5_000)).resolves.toMatchObject({
+    items: [{ detailPath: '/pages/place-detail/index?v=1&poiId=poi%2F1%20%3F%25%26%23' }],
+  })
 })

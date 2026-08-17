@@ -10,6 +10,17 @@ type Event =
   | { action: 'addBatch'; poiIds: string[] }
   | { action: 'remove'; poiId: string }
 
+type EventResult<T extends Event> = T extends { action: 'list' }
+  ? Awaited<ReturnType<FavoriteRepository['list']>>
+  : T extends { action: 'remove'; poiId: infer PoiId }
+    ? { removed: PoiId }
+    : {
+        created: string[]
+        existing: string[]
+        duplicateSelections: string[]
+        failed: Array<{ poiId: string; code: string }>
+      }
+
 interface CloudBaseSdk {
   SYMBOL_CURRENT_ENV: unknown
   getCloudbaseContext(context: unknown): { OPENID?: string }
@@ -21,14 +32,14 @@ interface CloudBaseSdk {
 }
 
 export function createFavoritesHandler(deps: { getOpenId(): string | undefined; repo: FavoriteRepository }) {
-  return async (event: Event) => {
+  return async <T extends Event>(event: T): Promise<EventResult<T>> => {
     const openid = deps.getOpenId()
     if (!openid) throw new Error('UNAUTHENTICATED')
 
-    if (event.action === 'list') return { items: await deps.repo.list(openid) }
+    if (event.action === 'list') return deps.repo.list(openid) as Promise<EventResult<T>>
     if (event.action === 'remove') {
       await deps.repo.remove(openid, event.poiId)
-      return { removed: event.poiId }
+      return { removed: event.poiId } as EventResult<T>
     }
 
     const existingSet = await deps.repo.findExisting(openid, event.poiIds)
@@ -39,7 +50,7 @@ export function createFavoritesHandler(deps: { getOpenId(): string | undefined; 
       existing: [...plan.existing, ...inserted.existing],
       duplicateSelections: plan.duplicateSelections,
       failed: inserted.failed,
-    }
+    } as EventResult<T>
   }
 }
 

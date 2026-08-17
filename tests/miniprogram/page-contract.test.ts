@@ -34,6 +34,12 @@ it('uses a direct stable POI key for favorite cards', () => {
   expect(read('miniprogram/pages/home/index.wxml')).toContain('wx:key="poiId"')
 })
 
+it('binds a pre-encoded detail path instead of concatenating an unescaped POI id in WXML', () => {
+  const home = read('miniprogram/pages/home/index.wxml')
+  expect(home).toContain('url="{{item.detailPath}}"')
+  expect(home).not.toContain('poiId={{item.place.poiId}}')
+})
+
 it('renders an empty address safely when a place has no address', () => {
   expect(read('miniprogram/pages/home/index.wxml')).toContain("{{item.place.address || ''}}")
 })

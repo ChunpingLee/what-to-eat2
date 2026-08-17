@@ -5,6 +5,7 @@ import type { RecommendationResult } from '../../cloudfunctions/recommend/index'
 
 interface FavoritesListResult {
   items: Place[]
+  unresolved: string[]
 }
 
 export async function listFavorites(): Promise<Place[]> {

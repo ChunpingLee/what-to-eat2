@@ -6,6 +6,7 @@ import { parseAmapPage } from './parsers/amap'
 import { parseDianpingPage } from './parsers/dianping'
 import { parseMeituanPage } from './parsers/meituan'
 import type { PlaceHint } from './parsers/shared'
+import { createCloudBasePublicPlaceStore, type PublicPlacesDatabase } from '../shared/public-places'
 import {
   LinkImportError,
   fetchAllowedPage,
@@ -77,7 +78,7 @@ interface LinkImportEvent {
 
 interface CloudBaseSdk {
   SYMBOL_CURRENT_ENV: unknown
-  init(options: { env: unknown }): { database(): CloudBaseCacheDatabase }
+  init(options: { env: unknown }): { database(): CloudBaseCacheDatabase & PublicPlacesDatabase }
 }
 
 function centerFrom(value: unknown): GeoPoint | undefined {
@@ -104,9 +105,11 @@ export async function main(
       if (!center || !city) return []
       if (!service) {
         const cloudbase = sdk.init({ env: sdk.SYMBOL_CURRENT_ENV })
+        const database = cloudbase.database()
         service = createPlaceSearchService({
           client: createAmapClient(),
-          cache: createCloudBaseSearchCache(cloudbase.database()),
+          cache: createCloudBaseSearchCache(database),
+          places: createCloudBasePublicPlaceStore(database),
         })
       }
       return (await service.searchPlaces({ keywords: hint.name, city, center, radiusMeters: 5_000 })).items

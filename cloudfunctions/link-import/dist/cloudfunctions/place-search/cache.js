@@ -52,6 +52,22 @@ function createPlaceSearchService(deps) {
                 });
                 const result = { items, sourceUpdatedAt: new Date(currentTime).toISOString() };
                 await deps.cache.set({ key, cachedAt: currentTime, result });
+                if (deps.places) {
+                    try {
+                        await deps.places.upsertMany(items, result.sourceUpdatedAt);
+                    }
+                    catch (error) {
+                        const failedCount = typeof error === 'object' && error !== null && 'failedCount' in error
+                            && typeof error.failedCount === 'number'
+                            ? error.failedCount
+                            : items.length;
+                        const warning = { code: 'PUBLIC_PLACE_PERSIST_FAILED', failedCount };
+                        if (deps.onPlacePersistenceWarning)
+                            deps.onPlacePersistenceWarning(warning);
+                        else
+                            console.error(warning);
+                    }
+                }
                 return { ...result, stale: false };
             }
             catch (error) {

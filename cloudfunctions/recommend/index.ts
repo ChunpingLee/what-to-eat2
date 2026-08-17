@@ -19,6 +19,7 @@ import {
   createCloudBaseRouteRateLimiter,
   type CloudBaseRouteRateLimitDatabase,
 } from '../place-routes/rate-limiter'
+import { createCloudBasePublicPlaceStore, type PublicPlacesDatabase } from '../shared/public-places'
 
 export type { RouteTimesClient } from '../place-routes/amap-routes'
 
@@ -182,7 +183,9 @@ export function createLazyRouteTimesClient(
 
 interface CloudBaseSdk {
   SYMBOL_CURRENT_ENV: unknown
-  init(options: { env: unknown }): { database(): CloudBaseCacheDatabase & CloudBaseRouteRateLimitDatabase }
+  init(options: { env: unknown }): {
+    database(): CloudBaseCacheDatabase & CloudBaseRouteRateLimitDatabase & PublicPlacesDatabase
+  }
 }
 
 export function main(
@@ -195,6 +198,7 @@ export function main(
   const searchService = createPlaceSearchService({
     client: createAmapClient(),
     cache: createCloudBaseSearchCache(database),
+    places: createCloudBasePublicPlaceStore(database),
   })
   return createRecommendHandler({
     searchClient: { search: query => searchService.searchPlaces(query) },

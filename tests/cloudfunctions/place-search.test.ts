@@ -3,6 +3,11 @@ import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { AmapTimeoutError, createAmapClient, createAmapHttp } from '../../cloudfunctions/place-search/amap-client'
 import { createPlaceSearchService, createMemorySearchCache } from '../../cloudfunctions/place-search/cache'
+import {
+  createCloudBasePublicPlaceStore,
+  publicPlaceDocumentId,
+} from '../../cloudfunctions/shared/public-places'
+import { createSharePlaceHandler } from '../../cloudfunctions/share-place/index'
 
 const query = {
   keywords: ' 店 ',
@@ -12,6 +17,44 @@ const query = {
 }
 
 describe('place search cloud function', () => {
+  it('persists a normalized Amap result so share resolution reads the same public POI', async () => {
+    const documents = new Map<string, Record<string, unknown>>()
+    const database = publicPlacesDatabase(documents)
+    const places = createCloudBasePublicPlaceStore(database as never)
+    const item = {
+      poiId: 'p1', name: '公开餐厅', address: '人民路 1 号',
+      location: { latitude: 31.23, longitude: 121.47 }, categories: ['餐饮'],
+    }
+    const service = createPlaceSearchService({
+      client: { search: vi.fn().mockResolvedValue([item]) },
+      cache: createMemorySearchCache(),
+      places,
+      now: () => 1_000_000,
+    })
+
+    await expect(service.searchPlaces(query)).resolves.toMatchObject({ items: [item] })
+    expect(documents.get(publicPlaceDocumentId('p1'))).toMatchObject({
+      ...item, sourceUpdatedAt: new Date(1_000_000).toISOString(),
+    })
+    await expect(createSharePlaceHandler({ repo: places })({ v: 1, poiId: 'p1' }))
+      .resolves.toEqual({ place: item })
+  })
+
+  it('returns fresh search results and emits only a safe warning when public POI persistence fails', async () => {
+    const warning = vi.fn()
+    const item = { poiId: 'p1', name: '店', location: query.center }
+    const service = createPlaceSearchService({
+      client: { search: vi.fn().mockResolvedValue([item]) },
+      cache: createMemorySearchCache(),
+      places: { upsertMany: vi.fn().mockRejectedValue(new Error('raw database detail')) },
+      onPlacePersistenceWarning: warning,
+      now: () => 1_000_000,
+    })
+
+    await expect(service.searchPlaces(query)).resolves.toMatchObject({ items: [item], stale: false })
+    expect(warning).toHaveBeenCalledWith({ code: 'PUBLIC_PLACE_PERSIST_FAILED', failedCount: 1 })
+    expect(JSON.stringify(warning.mock.calls)).not.toContain('raw database detail')
+  })
   it('uses the V5 around endpoint with location, radius, region and requested detail fields', async () => {
     const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ status: '1', pois: [] }) })
 
@@ -132,3 +175,19 @@ describe('place search cloud function', () => {
     expect(require(entry).main).toBeTypeOf('function')
   })
 })
+
+function publicPlacesDatabase(documents: Map<string, Record<string, unknown>>) {
+  return {
+    collection: vi.fn(() => ({
+      doc: vi.fn((id: string) => ({
+        set: async ({ data }: { data: Record<string, unknown> }) => { documents.set(id, data) },
+        get: async () => ({ data: documents.has(id) ? [documents.get(id)] : [] }),
+      })),
+      where: vi.fn((query: { poiId: string }) => ({
+        limit: vi.fn(() => ({
+          get: async () => ({ data: [...documents.values()].filter(item => item.poiId === query.poiId).slice(0, 1) }),
+        })),
+      })),
+    })),
+  }
+}

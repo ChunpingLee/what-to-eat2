@@ -11,6 +11,7 @@ const amap_client_1 = require("../place-search/amap-client");
 const cache_1 = require("../place-search/cache");
 const amap_routes_1 = require("../place-routes/amap-routes");
 const rate_limiter_1 = require("../place-routes/rate-limiter");
+const public_places_1 = require("../shared/public-places");
 class RecommendationRequestError extends Error {
     code = 'INVALID_RECOMMENDATION_REQUEST';
     constructor() {
@@ -144,6 +145,7 @@ function main(event, _context, sdk = require('@cloudbase/node-sdk')) {
     const searchService = (0, cache_1.createPlaceSearchService)({
         client: (0, amap_client_1.createAmapClient)(),
         cache: (0, cache_1.createCloudBaseSearchCache)(database),
+        places: (0, public_places_1.createCloudBasePublicPlaceStore)(database),
     });
     return createRecommendHandler({
         searchClient: { search: query => searchService.searchPlaces(query) },
