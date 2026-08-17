@@ -5,9 +5,9 @@ export interface Place {
   poiId: string
   name: string
   location: GeoPoint
-  address: string
+  address?: string
   businessArea?: string
-  categories: string[]
+  categories?: string[]
   rating?: number
   averageCost?: number
   tags?: string[]

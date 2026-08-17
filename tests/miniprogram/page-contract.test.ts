@@ -33,3 +33,7 @@ it('registers a recommendation page and navigates there from the home page', () 
 it('uses a direct stable POI key for favorite cards', () => {
   expect(read('miniprogram/pages/home/index.wxml')).toContain('wx:key="poiId"')
 })
+
+it('renders an empty address safely when a place has no address', () => {
+  expect(read('miniprogram/pages/home/index.wxml')).toContain("{{item.place.address || ''}}")
+})

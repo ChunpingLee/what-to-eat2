@@ -21,7 +21,7 @@
 
     <view wx:for="{{items}}" wx:key="poiId" class="favorite-card">
       <view class="name">{{item.place.name}}</view>
-      <view class="address">{{item.place.address}}</view>
+      <view class="address">{{item.place.address || ''}}</view>
       <view class="distance">{{item.distanceMeters}} 米</view>
     </view>
 

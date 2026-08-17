@@ -9,21 +9,16 @@ export interface PlaceSearchQuery {
   radiusMeters: number
 }
 
-export interface AmapPoi {
-  id: string
-  name: string
+export interface AmapResponse { status?: unknown; pois?: unknown; info?: unknown; infocode?: unknown }
+export interface AmapHttpQuery {
+  key: string
+  keywords: string
   location: string
-  address?: string
-  business_area?: string
-  type?: string
-  tag?: string
-  photos?: Array<{ url?: string }>
-  business_status?: string
-  biz_ext?: { rating?: string | number; cost?: string | number; business_status?: string } | unknown[]
+  radius: number
+  region: string
+  cityLimit: boolean
+  showFields: string
 }
-
-export interface AmapResponse { pois?: AmapPoi[] }
-export interface AmapHttpQuery { key: string; keywords: string; location: string; city: string; radius: number }
 export type AmapHttp = (query: AmapHttpQuery) => Promise<AmapResponse>
 
 export interface PlaceSearchClient { search(query: PlaceSearchQuery): Promise<Place[]> }
@@ -32,8 +27,8 @@ export class AmapTimeoutError extends SafeError {
   constructor() { super('AMAP_TIMEOUT', 'Place search timed out') }
 }
 
-function trimmed(value: string | undefined) {
-  const result = value?.trim()
+function trimmed(value: unknown) {
+  const result = typeof value === 'string' ? value.trim() : undefined
   return result || undefined
 }
 
@@ -46,61 +41,86 @@ function numeric(value: unknown) {
   return undefined
 }
 
-function split(value: string | undefined) {
-  const items = value?.split(';').map(item => item.trim()).filter(Boolean)
+function split(value: unknown) {
+  const text = trimmed(value)
+  const items = text?.split(';').map(item => item.trim()).filter(Boolean)
   return items && items.length > 0 ? items : undefined
 }
 
-function mapPoi(poi: AmapPoi): Place | undefined {
-  const [longitudeText, latitudeText] = poi.location.split(',')
+function record(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined
+}
+
+function mapPoi(value: unknown): Place | undefined {
+  const poi = record(value)
+  const location = trimmed(poi?.location)
+  const id = trimmed(poi?.id)
+  const name = trimmed(poi?.name)
+  if (!poi || !location || !id || !name) return undefined
+  const [longitudeText, latitudeText] = location.split(',')
   const longitude = Number(longitudeText)
   const latitude = Number(latitudeText)
-  if (!poi.id || !poi.name || !Number.isFinite(longitude) || !Number.isFinite(latitude)) return undefined
+  if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return undefined
 
-  const bizExt = Array.isArray(poi.biz_ext) ? undefined : poi.biz_ext
-  const photos = poi.photos?.flatMap(photo => {
-    const url = trimmed(photo.url)
+  const business = record(poi.business)
+  const photos = Array.isArray(poi.photos) ? poi.photos.flatMap(photo => {
+    const url = trimmed(record(photo)?.url)
     return url ? [url] : []
-  })
+  }) : undefined
+  const address = trimmed(poi.address)
+  const categories = split(poi.type)
+  const businessArea = trimmed(business?.business_area)
+  const rating = numeric(business?.rating)
+  const averageCost = numeric(business?.cost)
+  const tags = split(business?.tag)
+  const businessStatus = trimmed(business?.business_status) ?? trimmed(poi.business_status)
   return {
-    poiId: poi.id,
-    name: poi.name,
+    poiId: id,
+    name,
     location: { latitude, longitude },
-    address: poi.address ?? '',
-    businessArea: trimmed(poi.business_area),
-    categories: split(poi.type) ?? [],
-    rating: numeric(bizExt?.rating),
-    averageCost: numeric(bizExt?.cost),
-    tags: split(poi.tag),
-    photos: photos && photos.length > 0 ? photos : undefined,
-    businessStatus: trimmed(bizExt?.business_status) ?? trimmed(poi.business_status),
+    ...(address ? { address } : {}),
+    ...(categories ? { categories } : {}),
+    ...(businessArea ? { businessArea } : {}),
+    ...(rating === undefined ? {} : { rating }),
+    ...(averageCost === undefined ? {} : { averageCost }),
+    ...(tags ? { tags } : {}),
+    ...(photos && photos.length > 0 ? { photos } : {}),
+    ...(businessStatus ? { businessStatus } : {}),
   }
 }
 
-async function fetchAmap(query: AmapHttpQuery): Promise<AmapResponse> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 8_000)
-  try {
-    const params = new URLSearchParams({
-      key: query.key,
-      keywords: query.keywords,
-      location: query.location,
-      city: query.city,
-      radius: String(query.radius),
-    })
-    const response = await fetch(`https://restapi.amap.com/v5/place/text?${params}`, { signal: controller.signal })
-    if (!response.ok) throw new SafeError('AMAP_UNAVAILABLE', 'Place search is temporarily unavailable')
-    return await response.json() as AmapResponse
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') throw new AmapTimeoutError()
-    if (error instanceof SafeError) throw error
-    throw new SafeError('AMAP_UNAVAILABLE', 'Place search is temporarily unavailable')
-  } finally {
-    clearTimeout(timer)
+type FetchLike = (input: string, init: { signal: AbortSignal }) => Promise<{ ok: boolean; json(): Promise<unknown> }>
+
+export function createAmapHttp(fetcher: FetchLike = fetch): AmapHttp {
+  return async query => {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 8_000)
+    try {
+      const params = new URLSearchParams({
+        key: query.key,
+        keywords: query.keywords,
+        location: query.location,
+        radius: String(query.radius),
+        region: query.region,
+        city_limit: String(query.cityLimit),
+        show_fields: query.showFields,
+      })
+      const response = await fetcher(`https://restapi.amap.com/v5/place/around?${params}`, { signal: controller.signal })
+      if (!response.ok) throw new SafeError('AMAP_UNAVAILABLE', 'Place search is temporarily unavailable')
+      return await response.json() as AmapResponse
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') throw new AmapTimeoutError()
+      if (error instanceof SafeError) throw error
+      throw new SafeError('AMAP_UNAVAILABLE', 'Place search is temporarily unavailable')
+    } finally {
+      clearTimeout(timer)
+    }
   }
 }
 
-export function createAmapClient({ key = process.env.AMAP_WEB_KEY, http = fetchAmap }: { key?: string; http?: AmapHttp } = {}): PlaceSearchClient {
+export function createAmapClient({ key = process.env.AMAP_WEB_KEY, http = createAmapHttp() }: { key?: string; http?: AmapHttp } = {}): PlaceSearchClient {
   if (!key) throw new SafeError('AMAP_NOT_CONFIGURED', 'Place search is not configured')
   return {
     async search(query) {
@@ -108,10 +128,15 @@ export function createAmapClient({ key = process.env.AMAP_WEB_KEY, http = fetchA
         key,
         keywords: query.keywords.trim(),
         location: `${query.center.longitude},${query.center.latitude}`,
-        city: query.city.trim(),
         radius: query.radiusMeters,
+        region: query.city.trim(),
+        cityLimit: true,
+        showFields: 'business,photos',
       })
-      return (response.pois ?? []).flatMap(poi => {
+      if (response.status !== '1' || !Array.isArray(response.pois)) {
+        throw new SafeError('AMAP_UNAVAILABLE', 'Place search is temporarily unavailable')
+      }
+      return response.pois.flatMap(poi => {
         const mapped = mapPoi(poi)
         return mapped ? [mapped] : []
       })
