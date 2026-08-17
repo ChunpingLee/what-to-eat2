@@ -65,6 +65,63 @@ function statefulCloudBaseDatabase(transactionDelayMs = 0) {
 }
 
 describe('route rate limiter', () => {
+  it('rebooks four expired slots that all wake at 1200ms instead of starting together', async () => {
+    let currentTime = 0
+    const flushMicrotasks = async () => {
+      for (let turn = 0; turn < 20; turn += 1) await Promise.resolve()
+    }
+    const slots = [100, 434, 768, 1_102, 1_300, 1_635, 1_970, 2_305]
+    let sleepers: Array<{ wakeAt: number; resolve: () => void }> = []
+    const limiter = createRouteRateLimiter({
+      store: { schedule: vi.fn().mockImplementation(async () => slots.shift()) },
+      qps: 3,
+      now: () => currentTime,
+      sleep: milliseconds => new Promise(resolve => {
+        sleepers.push({ wakeAt: currentTime + milliseconds, resolve })
+      }),
+    })
+    const starts: number[] = []
+    const pending = Array.from({ length: 4 }, () => limiter
+      .acquire({ key: 'secret', service: 'walking', deadlineMs: 3_000 })
+      .then(() => { starts.push(currentTime) }))
+    await flushMicrotasks()
+    expect(sleepers).toHaveLength(4)
+
+    currentTime = 1_200
+    const firstWake = sleepers
+    sleepers = []
+    firstWake.forEach(sleeper => sleeper.resolve())
+    await flushMicrotasks()
+    expect(starts).toEqual([])
+    expect(sleepers.map(sleeper => sleeper.wakeAt)).toEqual([1_300, 1_635, 1_970, 2_305])
+
+    for (const time of [1_300, 1_635, 1_970, 2_305]) {
+      currentTime = time
+      const due = sleepers.filter(sleeper => sleeper.wakeAt <= time)
+      sleepers = sleepers.filter(sleeper => sleeper.wakeAt > time)
+      due.forEach(sleeper => sleeper.resolve())
+      await flushMicrotasks()
+    }
+    await Promise.all(pending)
+
+    expect(starts).toEqual([1_300, 1_635, 1_970, 2_305])
+    expect(starts[3] - starts[0]).toBeGreaterThanOrEqual(1_000)
+  })
+
+  it.each([1, 2, 3, 4, 5])('accepts normal timer wake-up latency of %dms', async latenessMs => {
+    let currentTime = 0
+    const schedule = vi.fn().mockResolvedValue(100)
+    const limiter = createRouteRateLimiter({
+      store: { schedule },
+      qps: 3,
+      now: () => currentTime,
+      sleep: async milliseconds => { currentTime += milliseconds + latenessMs },
+    })
+
+    await expect(limiter.acquire({ key: 'secret', service: 'walking', deadlineMs: 1_000 })).resolves.toBeUndefined()
+    expect(schedule).toHaveBeenCalledOnce()
+  })
+
   it('limits twenty route calls to the configured QPS and preserves destination result positions', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(900)
@@ -143,23 +200,23 @@ describe('route rate limiter', () => {
       })
 
       const first = firstLimiter.acquire({ key: 'server-only-secret', service: 'walking', deadlineMs: 2_000 })
-      await vi.advanceTimersByTimeAsync(334)
+      await vi.advanceTimersByTimeAsync(335)
       await first
       const second = secondLimiter.acquire({ key: 'server-only-secret', service: 'walking', deadlineMs: 2_000 })
-      await vi.advanceTimersByTimeAsync(334)
+      await vi.advanceTimersByTimeAsync(335)
       await second
 
       const [documentId, persisted] = [...shared.documents.entries()][0]
       expect(documentId).not.toContain('server-only-secret')
       expect(documentId).toMatch(/^[a-f0-9]{64}$/)
       expect(persisted).toEqual({
-        nextAvailableAtMs: 1_002,
-        updatedAt: new Date(668).toISOString(),
+        nextAvailableAtMs: 1_005,
+        updatedAt: new Date(670).toISOString(),
       })
       expect(shared.reads).toEqual([
         undefined,
-        { nextAvailableAtMs: 334, updatedAt: new Date(0).toISOString() },
-        { nextAvailableAtMs: 668, updatedAt: new Date(334).toISOString() },
+        { nextAvailableAtMs: 335, updatedAt: new Date(0).toISOString() },
+        { nextAvailableAtMs: 670, updatedAt: new Date(335).toISOString() },
       ])
       expect('data' in persisted).toBe(false)
     } finally {

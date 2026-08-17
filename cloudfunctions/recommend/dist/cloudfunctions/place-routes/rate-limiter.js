@@ -9,6 +9,7 @@ const node_crypto_1 = require("node:crypto");
 const amap_routes_1 = require("./amap-routes");
 const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 const unavailable = () => new amap_routes_1.AmapRoutesError('AMAP_ROUTES_UNAVAILABLE', '路线时间暂时无法计算');
+const MAX_WAKE_LATENESS_MS = 5;
 function beforeDeadline(operation, remainingMs) {
     return new Promise((resolve, reject) => {
         const timer = setTimeout(() => reject(unavailable()), remainingMs);
@@ -27,12 +28,23 @@ function routeRateLimitScope(key, service) {
 function createRouteRateLimiter({ store, qps, now = Date.now, sleep = wait, }) {
     if (!Number.isSafeInteger(qps) || qps <= 0)
         throw new RangeError('qps must be a positive integer');
+    const sleepUntil = async (scheduledAtMs, deadlineMs) => {
+        for (;;) {
+            const currentTime = now();
+            if (currentTime >= scheduledAtMs)
+                return currentTime;
+            if (currentTime >= deadlineMs)
+                throw unavailable();
+            await beforeDeadline(sleep(scheduledAtMs - currentTime), deadlineMs - currentTime);
+        }
+    };
     return {
         async acquire({ key, service, deadlineMs }) {
             const scope = routeRateLimitScope(key, service);
-            // Integer spacing is deliberately rounded up so timer millisecond rounding
-            // cannot create more than qps starts in any half-open 1-second interval.
-            const spacingMs = Math.ceil(1_000 / qps);
+            // qps slots span at least 1000ms plus the accepted wake-up jitter. Thus,
+            // even when an earlier slot wakes 5ms late and a later one is exact,
+            // any half-open 1-second interval still contains at most qps starts.
+            const spacingMs = Math.ceil((1_000 + MAX_WAKE_LATENESS_MS) / qps);
             for (;;) {
                 const currentTime = now();
                 if (currentTime >= deadlineMs)
@@ -47,9 +59,11 @@ function createRouteRateLimiter({ store, qps, now = Date.now, sleep = wait, }) {
                 // consumed and reserve again; immediate release would bunch route starts.
                 if (scheduledAtMs <= afterReservation)
                     continue;
-                await beforeDeadline(sleep(scheduledAtMs - afterReservation), deadlineMs - afterReservation);
-                if (now() >= deadlineMs)
+                const wakeTime = await sleepUntil(scheduledAtMs, deadlineMs);
+                if (wakeTime >= deadlineMs)
                     throw unavailable();
+                if (wakeTime - scheduledAtMs > MAX_WAKE_LATENESS_MS)
+                    continue;
                 return;
             }
         },

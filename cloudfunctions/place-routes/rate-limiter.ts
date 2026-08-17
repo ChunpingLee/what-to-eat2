@@ -14,6 +14,7 @@ type Sleep = (milliseconds: number) => Promise<void>
 
 const wait: Sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
 const unavailable = () => new AmapRoutesError('AMAP_ROUTES_UNAVAILABLE', '路线时间暂时无法计算')
+const MAX_WAKE_LATENESS_MS = 5
 
 function beforeDeadline<T>(operation: Promise<T>, remainingMs: number): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -47,12 +48,21 @@ export function createRouteRateLimiter({
   sleep?: Sleep
 }): RouteRateLimiter {
   if (!Number.isSafeInteger(qps) || qps <= 0) throw new RangeError('qps must be a positive integer')
+  const sleepUntil = async (scheduledAtMs: number, deadlineMs: number): Promise<number> => {
+    for (;;) {
+      const currentTime = now()
+      if (currentTime >= scheduledAtMs) return currentTime
+      if (currentTime >= deadlineMs) throw unavailable()
+      await beforeDeadline(sleep(scheduledAtMs - currentTime), deadlineMs - currentTime)
+    }
+  }
   return {
     async acquire({ key, service, deadlineMs }) {
       const scope = routeRateLimitScope(key, service)
-      // Integer spacing is deliberately rounded up so timer millisecond rounding
-      // cannot create more than qps starts in any half-open 1-second interval.
-      const spacingMs = Math.ceil(1_000 / qps)
+      // qps slots span at least 1000ms plus the accepted wake-up jitter. Thus,
+      // even when an earlier slot wakes 5ms late and a later one is exact,
+      // any half-open 1-second interval still contains at most qps starts.
+      const spacingMs = Math.ceil((1_000 + MAX_WAKE_LATENESS_MS) / qps)
       for (;;) {
         const currentTime = now()
         if (currentTime >= deadlineMs) throw unavailable()
@@ -67,8 +77,9 @@ export function createRouteRateLimiter({
         // A transaction can return after its slot. Treat that reservation as
         // consumed and reserve again; immediate release would bunch route starts.
         if (scheduledAtMs <= afterReservation) continue
-        await beforeDeadline(sleep(scheduledAtMs - afterReservation), deadlineMs - afterReservation)
-        if (now() >= deadlineMs) throw unavailable()
+        const wakeTime = await sleepUntil(scheduledAtMs, deadlineMs)
+        if (wakeTime >= deadlineMs) throw unavailable()
+        if (wakeTime - scheduledAtMs > MAX_WAKE_LATENESS_MS) continue
         return
       }
     },
