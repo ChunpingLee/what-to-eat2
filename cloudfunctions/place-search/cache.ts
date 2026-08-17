@@ -53,13 +53,30 @@ export function createPlaceSearchService(deps: {
   now?: () => number
 }) {
   const now = deps.now ?? Date.now
+  const persistPlaces = async (result: Omit<PlaceSearchResult, 'stale'>) => {
+    if (!deps.places) return
+    try {
+      await deps.places.upsertMany(result.items, result.sourceUpdatedAt)
+    } catch (error) {
+      const failedCount = typeof error === 'object' && error !== null && 'failedCount' in error
+        && typeof (error as { failedCount?: unknown }).failedCount === 'number'
+        ? (error as { failedCount: number }).failedCount
+        : result.items.length
+      const warning = { code: 'PUBLIC_PLACE_PERSIST_FAILED' as const, failedCount }
+      if (deps.onPlacePersistenceWarning) deps.onPlacePersistenceWarning(warning)
+      else console.error(warning)
+    }
+  }
   return {
     async searchPlaces(query: PlaceSearchQuery): Promise<PlaceSearchResult> {
       validate(query)
       const key = cacheKeyFor(query)
       const cached = await deps.cache.get(key)
       const currentTime = now()
-      if (cached && currentTime - cached.cachedAt <= FRESH_CACHE_TTL_MS) return { ...cached.result, stale: false }
+      if (cached && currentTime - cached.cachedAt <= FRESH_CACHE_TTL_MS) {
+        await persistPlaces(cached.result)
+        return { ...cached.result, stale: false }
+      }
 
       try {
         const items = await deps.client.search({
@@ -69,23 +86,12 @@ export function createPlaceSearchService(deps: {
         })
         const result = { items, sourceUpdatedAt: new Date(currentTime).toISOString() }
         await deps.cache.set({ key, cachedAt: currentTime, result })
-        if (deps.places) {
-          try {
-            await deps.places.upsertMany(items, result.sourceUpdatedAt)
-          } catch (error) {
-            const failedCount = typeof error === 'object' && error !== null && 'failedCount' in error
-              && typeof (error as { failedCount?: unknown }).failedCount === 'number'
-              ? (error as { failedCount: number }).failedCount
-              : items.length
-            const warning = { code: 'PUBLIC_PLACE_PERSIST_FAILED' as const, failedCount }
-            if (deps.onPlacePersistenceWarning) deps.onPlacePersistenceWarning(warning)
-            else console.error(warning)
-          }
-        }
+        await persistPlaces(result)
         return { ...result, stale: false }
       } catch (error) {
         if (error instanceof SafeError && error.code === 'AMAP_TIMEOUT'
           && cached && currentTime - cached.cachedAt <= STALE_CACHE_MAX_AGE_MS) {
+          await persistPlaces(cached.result)
           return { ...cached.result, stale: true }
         }
         throw safePlaceSearchError(error)

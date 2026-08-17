@@ -55,6 +55,59 @@ describe('place search cloud function', () => {
     expect(warning).toHaveBeenCalledWith({ code: 'PUBLIC_PLACE_PERSIST_FAILED', failedCount: 1 })
     expect(JSON.stringify(warning.mock.calls)).not.toContain('raw database detail')
   })
+
+  it('repairs a failed first persistence on a fresh cache hit so share becomes readable', async () => {
+    const documents = new Map<string, Record<string, unknown>>()
+    const durablePlaces = createCloudBasePublicPlaceStore(publicPlacesDatabase(documents) as never)
+    const warning = vi.fn()
+    let attempts = 0
+    const places = {
+      findPublicByPoiId: durablePlaces.findPublicByPoiId,
+      async upsertMany(items: Parameters<typeof durablePlaces.upsertMany>[0], sourceUpdatedAt: string) {
+        attempts += 1
+        if (attempts === 1) throw new Error('transient database failure')
+        await durablePlaces.upsertMany(items, sourceUpdatedAt)
+      },
+    }
+    const item = { poiId: 'recover', name: '恢复店', location: query.center }
+    const client = { search: vi.fn().mockResolvedValue([item]) }
+    const service = createPlaceSearchService({
+      client, cache: createMemorySearchCache(), places,
+      onPlacePersistenceWarning: warning, now: () => 1_000_000,
+    })
+
+    await expect(service.searchPlaces(query)).resolves.toMatchObject({ items: [item], stale: false })
+    await expect(createSharePlaceHandler({ repo: places })({ v: 1, poiId: 'recover' }))
+      .rejects.toThrow('PLACE_NOT_FOUND')
+
+    await expect(service.searchPlaces(query)).resolves.toMatchObject({ items: [item], stale: false })
+    await expect(createSharePlaceHandler({ repo: places })({ v: 1, poiId: 'recover' }))
+      .resolves.toEqual({ place: item })
+    expect(client.search).toHaveBeenCalledTimes(1)
+    expect(attempts).toBe(2)
+    expect(warning).toHaveBeenCalledTimes(1)
+  })
+
+  it('best-effort upserts stale timeout items and warns safely without blocking fallback', async () => {
+    const cache = createMemorySearchCache()
+    const cachedAt = 1_000_000 - 31 * 60 * 1_000
+    const item = { poiId: 'stale', name: '旧店', location: query.center }
+    await cache.set({
+      key: cache.keyFor(query), cachedAt,
+      result: { items: [item], sourceUpdatedAt: new Date(cachedAt).toISOString() },
+    })
+    const places = { upsertMany: vi.fn().mockRejectedValue(new Error('private storage detail')) }
+    const warning = vi.fn()
+    const service = createPlaceSearchService({
+      client: { search: vi.fn().mockRejectedValue(new AmapTimeoutError()) },
+      cache, places, onPlacePersistenceWarning: warning, now: () => 1_000_000,
+    })
+
+    await expect(service.searchPlaces(query)).resolves.toMatchObject({ items: [item], stale: true })
+    expect(places.upsertMany).toHaveBeenCalledWith([item], new Date(cachedAt).toISOString())
+    expect(warning).toHaveBeenCalledWith({ code: 'PUBLIC_PLACE_PERSIST_FAILED', failedCount: 1 })
+    expect(JSON.stringify(warning.mock.calls)).not.toContain('private storage detail')
+  })
   it('uses the V5 around endpoint with location, radius, region and requested detail fields', async () => {
     const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ status: '1', pois: [] }) })
 
