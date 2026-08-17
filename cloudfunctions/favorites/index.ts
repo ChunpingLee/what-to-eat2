@@ -12,7 +12,7 @@ type Event =
 
 interface CloudBaseSdk {
   SYMBOL_CURRENT_ENV: unknown
-  getWXContext(): { OPENID?: string }
+  getCloudbaseContext(context: unknown): { OPENID?: string }
   init(options: { env: unknown }): {
     database(): CloudBaseFavoritesDatabase & {
       command: { in(poiIds: string[]): unknown }
@@ -38,16 +38,17 @@ export function createFavoritesHandler(deps: { getOpenId(): string | undefined; 
       created: inserted.created,
       existing: [...plan.existing, ...inserted.existing],
       duplicateSelections: plan.duplicateSelections,
+      failed: inserted.failed,
     }
   }
 }
 
-export const main = (event: Event) => {
-  const cloudbase = require('@cloudbase/node-sdk') as CloudBaseSdk
+export const main = (event: Event, context: unknown, sdk: CloudBaseSdk = require('@cloudbase/node-sdk') as CloudBaseSdk) => {
+  const cloudbase = sdk
   const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV })
   const database = app.database()
   const handler = createFavoritesHandler({
-    getOpenId: () => cloudbase.getWXContext().OPENID,
+    getOpenId: () => cloudbase.getCloudbaseContext(context).OPENID,
     repo: createCloudBaseFavoritesRepository(database, poiIds => database.command.in(poiIds)),
   })
   return handler(event)

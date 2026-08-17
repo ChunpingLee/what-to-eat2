@@ -1,7 +1,29 @@
 {
-  "favorites": { ".read": "doc._openid == auth.openid", ".write": "doc._openid == auth.openid" },
-  "imports": { ".read": "doc._openid == auth.openid", ".write": "doc._openid == auth.openid" },
-  "recommendation_events": { ".read": "doc._openid == auth.openid", ".write": "doc._openid == auth.openid" },
-  "places": { ".read": true, ".write": false },
-  "users": { ".read": "doc._openid == auth.openid", ".write": "doc._openid == auth.openid" }
+  "collections": [
+    {
+      "name": "favorites",
+      "aclTag": "CUSTOM",
+      "rule": { "read": "doc._openid == auth.openid", "write": false }
+    },
+    {
+      "name": "imports",
+      "aclTag": "CUSTOM",
+      "rule": { "read": "doc._openid == auth.openid", "write": false }
+    },
+    {
+      "name": "recommendation_events",
+      "aclTag": "CUSTOM",
+      "rule": { "read": "doc._openid == auth.openid", "write": false }
+    },
+    {
+      "name": "places",
+      "aclTag": "CUSTOM",
+      "rule": { "read": true, "write": false }
+    },
+    {
+      "name": "users",
+      "aclTag": "CUSTOM",
+      "rule": { "read": "doc._openid == auth.openid", "write": false }
+    }
+  ]
 }

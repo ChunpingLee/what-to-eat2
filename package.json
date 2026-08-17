@@ -4,10 +4,12 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "rules:deploy": "node cloudbase/deploy-rules.js"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@cloudbase/manager-node": "^4.3.2",
     "typescript": "^5.9.0",
     "vitest": "^3.2.0"
   }

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { createFavoritesHandler } from '../../cloudfunctions/favorites/index'
+import { createFavoritesHandler, main } from '../../cloudfunctions/favorites/index'
 import { createCloudBaseFavoritesRepository } from '../../cloudfunctions/favorites/repository'
 
 describe('favorites cloud function', () => {
@@ -34,11 +34,26 @@ describe('favorites cloud function', () => {
     expect(repo.list).toHaveBeenCalledWith('trusted-user')
   })
 
+  it('runs the production main with the OpenID from CloudBase context', async () => {
+    const where = vi.fn().mockReturnThis()
+    const get = vi.fn().mockResolvedValue({ data: [] })
+    const database = { command: { in: vi.fn() }, collection: vi.fn().mockReturnValue({ where, get }) }
+    const sdk = {
+      SYMBOL_CURRENT_ENV: Symbol('current'),
+      init: vi.fn().mockReturnValue({ database: () => database }),
+      getCloudbaseContext: vi.fn().mockReturnValue({ OPENID: 'context-user' }),
+    }
+
+    await expect(main({ action: 'list' }, { requestId: 'request-1' }, sdk as never)).resolves.toEqual({ items: [] })
+    expect(sdk.getCloudbaseContext).toHaveBeenCalledWith({ requestId: 'request-1' })
+    expect(where).toHaveBeenCalledWith({ _openid: 'context-user' })
+  })
+
   it('adds multiple branches and reports existing records', async () => {
     const repo = {
       list: vi.fn(),
       findExisting: vi.fn().mockResolvedValue(new Set(['p2'])),
-      insert: vi.fn().mockResolvedValue({ created: ['p1'], existing: [] }),
+      insert: vi.fn().mockResolvedValue({ created: ['p1'], existing: [], failed: [] }),
       remove: vi.fn(),
     }
     const handler = createFavoritesHandler({ getOpenId: () => 'u1', repo })
@@ -47,6 +62,7 @@ describe('favorites cloud function', () => {
       created: ['p1'],
       existing: ['p2'],
       duplicateSelections: ['p1'],
+      failed: [],
     })
     expect(repo.findExisting).toHaveBeenCalledWith('u1', ['p1', 'p2', 'p1'])
     expect(repo.insert).toHaveBeenCalledWith('u1', ['p1'])
@@ -73,7 +89,7 @@ describe('favorites cloud function', () => {
     const collection = () => ({
       where: (query: Record<string, unknown>) => ({
         get: async () => ({
-          data: [...records.values()].filter(record => record._openid === query._openid && record.poiId === query.poiId),
+          data: [...records.values()].filter(record => record._openid === query._openid && (record.poiId === query.poiId || record._id === query._id)),
         }),
         remove: async () => undefined,
       }),
@@ -93,5 +109,37 @@ describe('favorites cloud function', () => {
     expect(records.size).toBe(1)
     expect(results.flatMap(result => result.created)).toEqual(['p1'])
     expect(results.flatMap(result => result.existing)).toEqual(['p1'])
+  })
+
+  it('does not classify another unique-key conflict as an existing favorite', async () => {
+    const collection = () => ({
+      where: () => ({ get: async () => ({ data: [] }), remove: async () => undefined }),
+      add: async () => { throw { code: 'DATABASE_DUPLICATE_WRITE' } },
+    })
+    const repo = createCloudBaseFavoritesRepository({ collection } as never)
+
+    await expect(repo.insert('u1', ['p1'])).resolves.toEqual({
+      created: [], existing: [], failed: [{ poiId: 'p1', code: 'DATABASE_DUPLICATE_WRITE' }],
+    })
+  })
+
+  it('returns partial batch results without rolling back successful writes', async () => {
+    const records = new Map<string, { _id: string; poiId: string; _openid: string }>()
+    const collection = () => ({
+      where: (query: Record<string, unknown>) => ({
+        get: async () => ({ data: [...records.values()].filter(record => record._id === query._id && record._openid === query._openid && record.poiId === query.poiId) }),
+        remove: async () => undefined,
+      }),
+      add: async ({ data }: { data: { _id: string; poiId: string; _openid: string } }) => {
+        if (data.poiId === 'existing') { records.set(data._id, data); throw { code: 'DATABASE_DUPLICATE_WRITE' } }
+        if (data.poiId === 'denied') throw { code: 'DATABASE_PERMISSION_DENIED' }
+        records.set(data._id, data)
+      },
+    })
+    const handler = createFavoritesHandler({ getOpenId: () => 'u1', repo: createCloudBaseFavoritesRepository({ collection } as never) })
+
+    await expect(handler({ action: 'addBatch', poiIds: ['created', 'existing', 'denied'] })).resolves.toEqual({
+      created: ['created'], existing: ['existing'], duplicateSelections: [], failed: [{ poiId: 'denied', code: 'DATABASE_PERMISSION_DENIED' }],
+    })
   })
 })

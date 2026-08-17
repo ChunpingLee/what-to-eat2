@@ -22,15 +22,16 @@ function createFavoritesHandler(deps) {
             created: inserted.created,
             existing: [...plan.existing, ...inserted.existing],
             duplicateSelections: plan.duplicateSelections,
+            failed: inserted.failed,
         };
     };
 }
-const main = (event) => {
-    const cloudbase = require('@cloudbase/node-sdk');
+const main = (event, context, sdk = require('@cloudbase/node-sdk')) => {
+    const cloudbase = sdk;
     const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV });
     const database = app.database();
     const handler = createFavoritesHandler({
-        getOpenId: () => cloudbase.getWXContext().OPENID,
+        getOpenId: () => cloudbase.getCloudbaseContext(context).OPENID,
         repo: (0, repository_1.createCloudBaseFavoritesRepository)(database, poiIds => database.command.in(poiIds)),
     });
     return handler(event);
