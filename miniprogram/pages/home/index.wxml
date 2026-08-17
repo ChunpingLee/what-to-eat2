@@ -1,0 +1,31 @@
+<view class="page">
+  <view class="location-notice">我们仅在你查看附近收藏时使用当前位置，不会保存持续位置轨迹。</view>
+
+  <view class="radius-row" aria-label="搜索半径">
+    <button wx:for="{{radiusOptions}}" wx:key="*this" class="radius-button {{radiusMeters === item * 1000 ? 'active' : ''}}" data-radius="{{item}}" bindtap="onRadiusChange">{{item}} 公里</button>
+  </view>
+
+  <view wx:if="{{status === 'locationRequired'}}" class="location-required">
+    <text>需要地点才能按距离展示你的收藏。</text>
+    <button bindtap="requestCurrentLocation">允许定位</button>
+    <button class="secondary" bindtap="onManualLocation">手动选择地点</button>
+  </view>
+
+  <view wx:else>
+    <view wx:if="{{status === 'loading'}}" class="hint">正在加载附近收藏…</view>
+    <view wx:if="{{status === 'error'}}" class="error">
+      <text>加载失败：{{errorMessage}}</text>
+      <button bindtap="onRetry">重试</button>
+    </view>
+    <view wx:if="{{status === 'empty'}}" class="hint">这个范围内还没有收藏。</view>
+
+    <view wx:for="{{items}}" wx:key="place.poiId" class="favorite-card">
+      <view class="name">{{item.place.name}}</view>
+      <view class="address">{{item.place.address}}</view>
+      <view class="distance">{{item.distanceMeters}} 米</view>
+    </view>
+
+    <button wx:if="{{showRecommend}}" class="recommend-button" bindtap="onRecommend">换成附近推荐</button>
+    <button class="secondary" bindtap="onManualLocation">手动选择地点</button>
+  </view>
+</view>
