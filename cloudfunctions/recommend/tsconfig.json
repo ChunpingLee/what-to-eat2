@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "rootDir": "../..",
+    "outDir": "dist"
+  },
+  "include": [
+    "index.ts",
+    "../place-routes/amap-routes.ts",
+    "../place-search/amap-client.ts",
+    "../place-search/cache.ts",
+    "../../src/domain/favorites.ts",
+    "../../src/domain/geo.ts",
+    "../../src/domain/recommendation.ts",
+    "../../src/domain/recommendation-reasons.ts",
+    "../../src/shared/errors.ts",
+    "../../src/shared/types.ts"
+  ]
+}

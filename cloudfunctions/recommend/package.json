@@ -1,0 +1,14 @@
+{
+  "name": "recommend",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc --project tsconfig.json"
+  },
+  "dependencies": {
+    "@cloudbase/node-sdk": "^3.18.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

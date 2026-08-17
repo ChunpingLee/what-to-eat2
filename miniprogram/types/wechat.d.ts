@@ -23,6 +23,13 @@ declare const wx: {
     fail(error: unknown): void
   }): void
   showToast(options: { title: string; icon: 'none' }): void
+  openLocation(options: {
+    latitude: number
+    longitude: number
+    name?: string
+    address?: string
+    scale?: number
+  }): void
   cloud: {
     DYNAMIC_CURRENT_ENV: string
     init(options: { env: string }): void

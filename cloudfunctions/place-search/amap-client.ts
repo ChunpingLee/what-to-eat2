@@ -15,9 +15,10 @@ export interface AmapHttpQuery {
   keywords: string
   location: string
   radius: number
-  region: string
+  region?: string
   cityLimit: boolean
   showFields: string
+  pageSize?: number
 }
 export type AmapHttp = (query: AmapHttpQuery) => Promise<AmapResponse>
 
@@ -103,10 +104,13 @@ export function createAmapHttp(fetcher: FetchLike = fetch): AmapHttp {
         keywords: query.keywords,
         location: query.location,
         radius: String(query.radius),
-        region: query.region,
-        city_limit: String(query.cityLimit),
         show_fields: query.showFields,
       })
+      if (query.region) {
+        params.set('region', query.region)
+        params.set('city_limit', String(query.cityLimit))
+      }
+      if (query.pageSize !== undefined) params.set('page_size', String(query.pageSize))
       const response = await fetcher(`https://restapi.amap.com/v5/place/around?${params}`, { signal: controller.signal })
       if (!response.ok) throw new SafeError('AMAP_UNAVAILABLE', 'Place search is temporarily unavailable')
       return await response.json() as AmapResponse
@@ -129,9 +133,10 @@ export function createAmapClient({ key = process.env.AMAP_WEB_KEY, http = create
         keywords: query.keywords.trim(),
         location: `${query.center.longitude},${query.center.latitude}`,
         radius: query.radiusMeters,
-        region: query.city.trim(),
-        cityLimit: true,
+        ...(query.city.trim() ? { region: query.city.trim() } : {}),
+        cityLimit: Boolean(query.city.trim()),
         showFields: 'business,photos',
+        pageSize: 25,
       })
       if (response.status !== '1' || !Array.isArray(response.pois)) {
         throw new SafeError('AMAP_UNAVAILABLE', 'Place search is temporarily unavailable')

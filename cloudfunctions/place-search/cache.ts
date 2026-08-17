@@ -36,7 +36,7 @@ export function createMemorySearchCache(): PlaceSearchCache & { keyFor(query: Pl
 }
 
 function validate(query: PlaceSearchQuery) {
-  if (!query.keywords.trim() || !query.city.trim() || !Number.isFinite(query.center.latitude) || !Number.isFinite(query.center.longitude)
+  if (!query.keywords.trim() || !Number.isFinite(query.center.latitude) || !Number.isFinite(query.center.longitude)
     || !Number.isFinite(query.radiusMeters) || query.radiusMeters <= 0) {
     throw new SafeError('INVALID_SEARCH_QUERY', 'Invalid place search query')
   }

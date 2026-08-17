@@ -1,5 +1,7 @@
 import type { Place } from '../../src/domain/favorites'
 import type { GeoPoint } from '../../src/shared/types'
+import type { RecommendationRequest } from '../../src/domain/recommendation'
+import type { RecommendationResult } from '../../cloudfunctions/recommend/index'
 
 interface FavoritesListResult {
   items: Place[]
@@ -60,6 +62,14 @@ export async function importSharedLink(input: {
   const response = await wx.cloud.callFunction<LinkImportResult>({
     name: 'link-import',
     data: input,
+  })
+  return response.result
+}
+
+export async function recommendPlaces(request: RecommendationRequest): Promise<RecommendationResult> {
+  const response = await wx.cloud.callFunction<RecommendationResult>({
+    name: 'recommend',
+    data: request,
   })
   return response.result
 }

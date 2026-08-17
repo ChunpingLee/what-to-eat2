@@ -1,0 +1,11 @@
+{
+  "name": "place-routes",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc --project tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}
