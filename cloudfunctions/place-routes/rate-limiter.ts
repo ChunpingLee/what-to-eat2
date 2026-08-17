@@ -50,22 +50,26 @@ export function createRouteRateLimiter({
   return {
     async acquire({ key, service, deadlineMs }) {
       const scope = routeRateLimitScope(key, service)
-      const currentTime = now()
-      if (currentTime >= deadlineMs) throw unavailable()
-
       // Integer spacing is deliberately rounded up so timer millisecond rounding
       // cannot create more than qps starts in any half-open 1-second interval.
       const spacingMs = Math.ceil(1_000 / qps)
-      const scheduledAtMs = await beforeDeadline(
-        store.schedule(scope, currentTime, spacingMs, deadlineMs),
-        deadlineMs - currentTime,
-      )
-      if (scheduledAtMs === undefined) throw unavailable()
+      for (;;) {
+        const currentTime = now()
+        if (currentTime >= deadlineMs) throw unavailable()
+        const scheduledAtMs = await beforeDeadline(
+          store.schedule(scope, currentTime, spacingMs, deadlineMs),
+          deadlineMs - currentTime,
+        )
+        if (scheduledAtMs === undefined) throw unavailable()
 
-      const afterReservation = now()
-      if (afterReservation >= deadlineMs) throw unavailable()
-      if (scheduledAtMs > afterReservation) {
+        const afterReservation = now()
+        if (afterReservation >= deadlineMs) throw unavailable()
+        // A transaction can return after its slot. Treat that reservation as
+        // consumed and reserve again; immediate release would bunch route starts.
+        if (scheduledAtMs <= afterReservation) continue
         await beforeDeadline(sleep(scheduledAtMs - afterReservation), deadlineMs - afterReservation)
+        if (now() >= deadlineMs) throw unavailable()
+        return
       }
     },
   }
@@ -74,7 +78,7 @@ export function createRouteRateLimiter({
 interface RateLimitEntry { nextAvailableAtMs: number; updatedAt: string }
 interface TransactionDocument {
   get(): Promise<{ data: RateLimitEntry[] | RateLimitEntry | undefined }>
-  set(options: { data: RateLimitEntry }): Promise<unknown>
+  set(documentBody: RateLimitEntry): Promise<unknown>
 }
 interface RateLimitTransaction {
   collection(name: 'amap_route_rate_limits'): { doc(id: string): TransactionDocument }
@@ -103,10 +107,8 @@ export function createCloudBaseRoutePermitStore(
     const scheduledAtMs = Math.max(earliestMs, transactionTime, storedNext)
     if (scheduledAtMs >= deadlineMs) return undefined
     await document.set({
-      data: {
-        nextAvailableAtMs: scheduledAtMs + spacingMs,
-        updatedAt: new Date(scheduledAtMs).toISOString(),
-      },
+      nextAvailableAtMs: scheduledAtMs + spacingMs,
+      updatedAt: new Date(scheduledAtMs).toISOString(),
     })
     return scheduledAtMs
   })

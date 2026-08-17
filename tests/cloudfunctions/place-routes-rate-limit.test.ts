@@ -24,6 +24,46 @@ function memoryStore(): RoutePermitStore {
   }
 }
 
+interface PersistedPermit {
+  nextAvailableAtMs: number
+  updatedAt: string
+}
+
+function statefulCloudBaseDatabase(transactionDelayMs = 0) {
+  const documents = new Map<string, PersistedPermit>()
+  const reads: Array<PersistedPermit | undefined> = []
+  let transactionQueue: Promise<unknown> = Promise.resolve()
+  const database = {
+    runTransaction<T>(callback: (transaction: unknown) => Promise<T>): Promise<T> {
+      const execute = async () => {
+        if (transactionDelayMs > 0) {
+          await new Promise(resolve => setTimeout(resolve, transactionDelayMs))
+        }
+        const transaction = {
+          collection: () => ({
+            doc: (id: string) => ({
+              get: async () => {
+                const persisted = documents.get(id)
+                reads.push(persisted ? { ...persisted } : undefined)
+                return { data: persisted ? { ...persisted } : [] }
+              },
+              set: async (body: PersistedPermit) => {
+                if ('data' in body) throw new Error('CloudBase document body must not be wrapped in data')
+                documents.set(id, { ...body })
+              },
+            }),
+          }),
+        }
+        return callback(transaction)
+      }
+      const result = transactionQueue.then(execute, execute)
+      transactionQueue = result.then(() => undefined, () => undefined)
+      return result
+    },
+  }
+  return { database, documents, reads }
+}
+
 describe('route rate limiter', () => {
   it('limits twenty route calls to the configured QPS and preserves destination result positions', async () => {
     vi.useFakeTimers()
@@ -71,7 +111,9 @@ describe('route rate limiter', () => {
         http: vi.fn().mockResolvedValue({ status: '1', route: { paths: [{ cost: { duration: '60' } }] } }),
       })
       const pending = client.times(center, [center, { ...center, latitude: center.latitude + 0.001 }], 'walking')
-      const assertion = expect(pending).resolves.toEqual([1, undefined])
+      const assertion = expect(pending).rejects.toEqual(
+        new AmapRoutesError('AMAP_ROUTES_UNAVAILABLE', '路线时间暂时无法计算'),
+      )
       await vi.advanceTimersByTimeAsync(500)
 
       await assertion
@@ -88,24 +130,41 @@ describe('route rate limiter', () => {
     expect(parseRouteQps('not-a-number')).toBe(3)
   })
 
-  it('reserves a hashed key-and-service scope inside a CloudBase transaction', async () => {
-    const set = vi.fn().mockResolvedValue(undefined)
-    const doc = { get: vi.fn().mockResolvedValue({ data: [] }), set }
-    const transaction = { collection: vi.fn().mockReturnValue({ doc: vi.fn().mockReturnValue(doc) }) }
-    const database = {
-      runTransaction: vi.fn(async callback => callback(transaction)),
+  it('persists root document fields and advances them across consecutive acquires', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    try {
+      const shared = statefulCloudBaseDatabase()
+      const firstLimiter = createRouteRateLimiter({
+        store: createCloudBaseRoutePermitStore(shared.database as never), qps: 3,
+      })
+      const secondLimiter = createRouteRateLimiter({
+        store: createCloudBaseRoutePermitStore(shared.database as never), qps: 3,
+      })
+
+      const first = firstLimiter.acquire({ key: 'server-only-secret', service: 'walking', deadlineMs: 2_000 })
+      await vi.advanceTimersByTimeAsync(334)
+      await first
+      const second = secondLimiter.acquire({ key: 'server-only-secret', service: 'walking', deadlineMs: 2_000 })
+      await vi.advanceTimersByTimeAsync(334)
+      await second
+
+      const [documentId, persisted] = [...shared.documents.entries()][0]
+      expect(documentId).not.toContain('server-only-secret')
+      expect(documentId).toMatch(/^[a-f0-9]{64}$/)
+      expect(persisted).toEqual({
+        nextAvailableAtMs: 1_002,
+        updatedAt: new Date(668).toISOString(),
+      })
+      expect(shared.reads).toEqual([
+        undefined,
+        { nextAvailableAtMs: 334, updatedAt: new Date(0).toISOString() },
+        { nextAvailableAtMs: 668, updatedAt: new Date(334).toISOString() },
+      ])
+      expect('data' in persisted).toBe(false)
+    } finally {
+      vi.useRealTimers()
     }
-    const store = createCloudBaseRoutePermitStore(database as never, () => 1_000)
-
-    await expect(store.scheduleFor('server-only-secret', 'walking', 1_000, 334, 5_000)).resolves.toBe(1_000)
-
-    expect(database.runTransaction).toHaveBeenCalledOnce()
-    const documentId = transaction.collection.mock.results[0].value.doc.mock.calls[0][0] as string
-    expect(documentId).not.toContain('server-only-secret')
-    expect(documentId).toMatch(/^[a-f0-9]{64}$/)
-    expect(set).toHaveBeenCalledWith({
-      data: { nextAvailableAtMs: 1_334, updatedAt: new Date(1_000).toISOString() },
-    })
   })
 
   it('surfaces a fixed safe error when a permit cannot be obtained before the deadline', async () => {
@@ -172,7 +231,77 @@ describe('route rate limiter', () => {
 
     await expect(store.schedule('scope', 1_000, 250, 5_000)).resolves.toBe(2_000)
     expect(set).toHaveBeenCalledWith({
-      data: { nextAvailableAtMs: 2_250, updatedAt: new Date(2_000).toISOString() },
+      nextAvailableAtMs: 2_250,
+      updatedAt: new Date(2_000).toISOString(),
     })
+  })
+
+  it('limits shared multi-instance route starts when every transaction takes 100ms', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    try {
+      const qps = 3
+      const shared = statefulCloudBaseDatabase(100)
+      const callTimes: number[] = []
+      const http = vi.fn().mockImplementation(async query => {
+        callTimes.push(Date.now())
+        const latitude = Number(query.destination.split(',')[1])
+        const index = Math.round((latitude - center.latitude) / 0.0001)
+        return { status: '1', route: { paths: [{ cost: { duration: String(index * 60) } }] } }
+      })
+      const createClient = () => createAmapRoutesClient({
+        key: 'server-only', http, requestTimeoutMs: 9_000,
+        limiter: createRouteRateLimiter({
+          store: createCloudBaseRoutePermitStore(shared.database as never), qps,
+        }),
+      })
+      const destinations = Array.from({ length: 20 }, (_, index) => ({
+        latitude: center.latitude + (index + 1) * 0.0001,
+        longitude: center.longitude,
+      }))
+
+      const first = createClient().times(center, destinations.slice(0, 10), 'walking')
+      const second = createClient().times(center, destinations.slice(10), 'walking')
+      const assertion = Promise.all([
+        expect(first).resolves.toHaveLength(10),
+        expect(second).resolves.toHaveLength(10),
+      ])
+      await vi.advanceTimersByTimeAsync(9_000)
+      await assertion
+
+      const sortedTimes = [...callTimes].sort((left, right) => left - right)
+      for (let index = qps; index < sortedTimes.length; index += 1) {
+        expect(sortedTimes[index] - sortedTimes[index - qps]).toBeGreaterThanOrEqual(1_000)
+      }
+      expect(http).toHaveBeenCalledTimes(20)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('degrades without starting routes when transaction delay exceeds the permit spacing', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    try {
+      const shared = statefulCloudBaseDatabase(400)
+      const http = vi.fn().mockResolvedValue({ status: '1', route: { paths: [{ cost: { duration: '60' } }] } })
+      const client = createAmapRoutesClient({
+        key: 'server-only', http, requestTimeoutMs: 1_000,
+        limiter: createRouteRateLimiter({
+          store: createCloudBaseRoutePermitStore(shared.database as never), qps: 3,
+        }),
+      })
+
+      const pending = client.times(center, [center], 'walking')
+      const assertion = expect(pending).rejects.toEqual(
+        new AmapRoutesError('AMAP_ROUTES_UNAVAILABLE', '路线时间暂时无法计算'),
+      )
+      await vi.advanceTimersByTimeAsync(1_000)
+
+      await assertion
+      expect(http).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
