@@ -47,4 +47,25 @@ describe('place search controller', () => {
     resolveFirst({ items: [{ poiId: 'old', name: '旧结果', location: center }], stale: false, sourceUpdatedAt: 'then' })
     await expect(older).resolves.toBeUndefined()
   })
+
+  it('cancels an earlier delayed location intent before it can call place search', async () => {
+    let resolveCurrent!: (value: typeof center) => void
+    let resolveManual!: (value: typeof center) => void
+    const currentLocation = new Promise<typeof center>(resolve => { resolveCurrent = resolve })
+    const manualLocation = new Promise<typeof center>(resolve => { resolveManual = resolve })
+    const searchPlaces = vi.fn().mockResolvedValue({ items: [{ poiId: 'manual', name: '手选结果', location: center }], stale: false, sourceUpdatedAt: 'now' })
+    const controller = createPlaceSearchController({ listFavorites: vi.fn().mockResolvedValue([]), searchPlaces })
+
+    const firstIntent = controller.beginIntent()
+    const earlier = controller.locateAndSearch(firstIntent, { keywords: 'A', city: '上海', radiusMeters: 5_000 }, () => currentLocation)
+    const secondIntent = controller.beginIntent()
+    const later = controller.locateAndSearch(secondIntent, { keywords: 'B', city: '上海', radiusMeters: 3_000 }, () => manualLocation)
+
+    resolveManual(center)
+    await expect(later).resolves.toMatchObject({ branches: [{ poiId: 'manual' }] })
+    resolveCurrent(center)
+    await expect(earlier).resolves.toBeUndefined()
+    expect(searchPlaces).toHaveBeenCalledTimes(1)
+    expect(searchPlaces).toHaveBeenCalledWith({ keywords: 'B', city: '上海', center, radiusMeters: 3_000 })
+  })
 })

@@ -29,7 +29,7 @@ interface PlaceSearchPage {
   onCityInput(event: InputEvent): void
   onSearch(): void
   onManualLocation(): void
-  search(center: GeoPoint): Promise<void>
+  beginSearch(intent: number, locate: () => Promise<GeoPoint>): void
   onSelectionChange(event: PickerEvent): void
   onAddSelected(): Promise<void>
 }
@@ -50,9 +50,14 @@ export interface PlaceSearchQuery {
   radiusMeters: number
 }
 
+export type PlaceSearchInput = Omit<PlaceSearchQuery, 'center'>
+
 export interface PlaceSearchController {
   refreshFavorites(): Promise<Set<string>>
+  beginIntent(): number
+  isCurrent(intent: number): boolean
   search(query: PlaceSearchQuery): Promise<{ branches: BranchItem[]; stale: boolean } | undefined>
+  locateAndSearch(intent: number, input: PlaceSearchInput, locate: () => Promise<GeoPoint>): Promise<{ branches: BranchItem[]; stale: boolean } | undefined>
 }
 
 export function createPlaceSearchController(deps: {
@@ -61,35 +66,54 @@ export function createPlaceSearchController(deps: {
 }): PlaceSearchController {
   let latestRequestId = 0
   const refreshFavorites = async () => new Set((await deps.listFavorites()).map(place => place.poiId))
+  const beginIntent = () => ++latestRequestId
+  const isCurrent = (intent: number) => intent === latestRequestId
+
+  const searchForIntent = async (requestId: number, query: PlaceSearchQuery) => {
+    if (!isCurrent(requestId)) return undefined
+    let existingPoiIds: Set<string>
+    try {
+      existingPoiIds = await refreshFavorites()
+    } catch (error) {
+      if (!isCurrent(requestId)) return undefined
+      throw error
+    }
+    if (!isCurrent(requestId)) return undefined
+    let result: PlaceSearchResult
+    try {
+      result = await deps.searchPlaces(query)
+    } catch (error) {
+      if (!isCurrent(requestId)) return undefined
+      throw error
+    }
+    if (!isCurrent(requestId)) return undefined
+    return {
+      branches: result.items.map(place => ({
+        ...place,
+        distanceMeters: Math.round(distanceMeters(query.center, place.location)),
+        ...(existingPoiIds.has(place.poiId) ? { status: 'existing' as const } : {}),
+      })),
+      stale: result.stale,
+    }
+  }
 
   return {
     refreshFavorites,
+    beginIntent,
+    isCurrent,
     async search(query) {
-      const requestId = ++latestRequestId
-      let existingPoiIds: Set<string>
+      return searchForIntent(beginIntent(), query)
+    },
+    async locateAndSearch(intent, input, locate) {
+      let center: GeoPoint
       try {
-        existingPoiIds = await refreshFavorites()
+        center = await locate()
       } catch (error) {
-        if (requestId !== latestRequestId) return undefined
+        if (!isCurrent(intent)) return undefined
         throw error
       }
-      if (requestId !== latestRequestId) return undefined
-      let result: PlaceSearchResult
-      try {
-        result = await deps.searchPlaces(query)
-      } catch (error) {
-        if (requestId !== latestRequestId) return undefined
-        throw error
-      }
-      if (requestId !== latestRequestId) return undefined
-      return {
-        branches: result.items.map(place => ({
-          ...place,
-          distanceMeters: Math.round(distanceMeters(query.center, place.location)),
-          ...(existingPoiIds.has(place.poiId) ? { status: 'existing' as const } : {}),
-        })),
-        stale: result.stale,
-      }
+      if (!isCurrent(intent)) return undefined
+      return searchForIntent(intent, { ...input, center })
     },
   }
 }
@@ -120,37 +144,36 @@ if (typeof Page === 'function') {
     },
 
     onSearch(this: PlaceSearchPage) {
+      const intent = controller.beginIntent()
       if (!this.data.keywords.trim() || !this.data.city.trim()) {
         this.setData({ status: 'error', errorMessage: '请填写餐厅名称和城市' })
         return
       }
-      void getCurrentLocation().then(center => this.search(center)).catch(() => {
-        this.setData({ status: 'error', errorMessage: '需要当前位置才能搜索附近分店' })
-      })
+      this.beginSearch(intent, getCurrentLocation)
     },
 
     onManualLocation(this: PlaceSearchPage) {
+      const intent = controller.beginIntent()
       if (!this.data.keywords.trim() || !this.data.city.trim()) {
         this.setData({ status: 'error', errorMessage: '请填写餐厅名称和城市' })
         return
       }
-      void chooseManualLocation().then(center => this.search(center)).catch(() => {
-        this.setData({ status: 'error', errorMessage: '未选择地点，无法搜索附近分店' })
-      })
+      this.beginSearch(intent, chooseManualLocation)
     },
 
-    async search(this: PlaceSearchPage, center: GeoPoint) {
+    beginSearch(this: PlaceSearchPage, intent: number, locate: () => Promise<GeoPoint>) {
+      const input: PlaceSearchInput = {
+        keywords: this.data.keywords.trim(), city: this.data.city.trim(), radiusMeters: 5_000,
+      }
       this.setData({ status: 'searching', branches: [], selectedPoiIds: [], errorMessage: '', stale: false })
-      try {
-        const result = await controller.search({
-          keywords: this.data.keywords.trim(), city: this.data.city.trim(), center, radiusMeters: 5_000,
-        })
-        if (!result) return
+      void controller.locateAndSearch(intent, input, locate).then(result => {
+        if (!result || !controller.isCurrent(intent)) return
         const { branches } = result
         this.setData({ status: branches.length ? 'ready' : 'empty', branches, stale: result.stale })
-      } catch (error) {
+      }).catch(error => {
+        if (!controller.isCurrent(intent)) return
         this.setData({ status: 'error', errorMessage: visibleError(error) })
-      }
+      })
     },
 
     onSelectionChange(this: PlaceSearchPage, event: PickerEvent) {
