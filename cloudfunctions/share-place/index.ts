@@ -1,5 +1,6 @@
 import type { Place } from '../../src/domain/favorites'
 import { validateSharePoiId } from '../../src/domain/share'
+import { selectCloudBaseSdk } from '../shared/cloudbase-sdk'
 import {
   createCloudBasePublicPlaceStore,
   type PublicPlacesDatabase,
@@ -89,8 +90,9 @@ export function createSharePlaceHandler(deps: { repo: PublicPlaceRepository }) {
 export function main(
   event: SharePayload,
   _context: unknown,
-  sdk: CloudBaseSdk = require('@cloudbase/node-sdk') as CloudBaseSdk,
+  injected?: unknown,
 ) {
+  const sdk = selectCloudBaseSdk<CloudBaseSdk>(injected)
   const app = sdk.init({ env: sdk.SYMBOL_CURRENT_ENV })
   return createSharePlaceHandler({ repo: createCloudBasePublicPlaceStore(app.database()) })(event)
 }

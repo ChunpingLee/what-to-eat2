@@ -19,6 +19,7 @@ import {
   createCloudBaseRouteRateLimiter,
   type CloudBaseRouteRateLimitDatabase,
 } from '../place-routes/rate-limiter'
+import { selectCloudBaseSdk } from '../shared/cloudbase-sdk'
 import { createCloudBasePublicPlaceStore, type PublicPlacesDatabase } from '../shared/public-places'
 
 export type { RouteTimesClient } from '../place-routes/amap-routes'
@@ -192,8 +193,9 @@ interface CloudBaseSdk {
 export function main(
   event: RecommendationRequest,
   _context: unknown,
-  sdk: CloudBaseSdk = require('@cloudbase/node-sdk') as CloudBaseSdk,
+  injected?: unknown,
 ) {
+  const sdk = selectCloudBaseSdk<CloudBaseSdk>(injected)
   validate(event)
   const app = sdk.init({ env: sdk.SYMBOL_CURRENT_ENV })
   const database = app.database()

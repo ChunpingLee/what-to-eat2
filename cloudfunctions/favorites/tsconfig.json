@@ -15,6 +15,7 @@
     "repository.ts",
     "../shared/public-places.ts",
     "../shared/account-state.ts",
+    "../shared/cloudbase-sdk.ts",
     "../../src/domain/favorites.ts",
     "../../src/domain/geo.ts",
     "../../src/shared/types.ts"

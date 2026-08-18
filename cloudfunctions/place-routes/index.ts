@@ -3,6 +3,7 @@ import {
   createCloudBaseRouteRateLimiter,
   type CloudBaseRouteRateLimitDatabase,
 } from './rate-limiter'
+import { selectCloudBaseSdk } from '../shared/cloudbase-sdk'
 import type { GeoPoint, TravelMode } from '../../src/shared/types'
 
 export interface PlaceRoutesEvent {
@@ -19,8 +20,9 @@ interface CloudBaseSdk {
 export async function main(
   event: PlaceRoutesEvent,
   _context: unknown,
-  sdk: CloudBaseSdk = require('@cloudbase/node-sdk') as CloudBaseSdk,
+  injected?: unknown,
 ) {
+  const sdk = selectCloudBaseSdk<CloudBaseSdk>(injected)
   try {
     if (!event || typeof event !== 'object' || !Array.isArray(event.destinations)
       || !['walking', 'bicycling', 'driving'].includes(event.mode)) {

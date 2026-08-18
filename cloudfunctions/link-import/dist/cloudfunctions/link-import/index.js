@@ -5,6 +5,7 @@ exports.importLink = importLink;
 exports.main = main;
 const amap_client_1 = require("../place-search/amap-client");
 const cache_1 = require("../place-search/cache");
+const cloudbase_sdk_1 = require("../shared/cloudbase-sdk");
 const amap_1 = require("./parsers/amap");
 const dianping_1 = require("./parsers/dianping");
 const meituan_1 = require("./parsers/meituan");
@@ -64,7 +65,8 @@ function centerFrom(value) {
         ? { latitude: center.latitude, longitude: center.longitude }
         : undefined;
 }
-async function main(event, _context, sdk = require('@cloudbase/node-sdk')) {
+async function main(event, _context, injected) {
+    const sdk = (0, cloudbase_sdk_1.selectCloudBaseSdk)(injected);
     try {
         if (typeof event?.url !== 'string')
             throw (0, url_policy_1.unavailableLink)();

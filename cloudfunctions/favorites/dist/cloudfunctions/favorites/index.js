@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.main = void 0;
 exports.createFavoritesHandler = createFavoritesHandler;
 const favorites_1 = require("../../src/domain/favorites");
+const cloudbase_sdk_1 = require("../shared/cloudbase-sdk");
 const repository_1 = require("./repository");
 function createFavoritesHandler(deps) {
     return async (event) => {
@@ -26,8 +27,8 @@ function createFavoritesHandler(deps) {
         };
     };
 }
-const main = (event, context, sdk = require('@cloudbase/node-sdk')) => {
-    const cloudbase = sdk;
+const main = (event, context, injected) => {
+    const cloudbase = (0, cloudbase_sdk_1.selectCloudBaseSdk)(injected);
     const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV });
     const database = app.database();
     const handler = createFavoritesHandler({

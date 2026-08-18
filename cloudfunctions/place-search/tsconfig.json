@@ -15,6 +15,7 @@
     "amap-client.ts",
     "cache.ts",
     "../shared/public-places.ts",
+    "../shared/cloudbase-sdk.ts",
     "../../src/domain/favorites.ts",
     "../../src/domain/geo.ts",
     "../../src/shared/types.ts",

@@ -11,6 +11,7 @@ const amap_client_1 = require("../place-search/amap-client");
 const cache_1 = require("../place-search/cache");
 const amap_routes_1 = require("../place-routes/amap-routes");
 const rate_limiter_1 = require("../place-routes/rate-limiter");
+const cloudbase_sdk_1 = require("../shared/cloudbase-sdk");
 const public_places_1 = require("../shared/public-places");
 class RecommendationRequestError extends Error {
     code = 'INVALID_RECOMMENDATION_REQUEST';
@@ -141,7 +142,8 @@ function createLazyRouteTimesClient(createClient) {
         },
     };
 }
-function main(event, _context, sdk = require('@cloudbase/node-sdk')) {
+function main(event, _context, injected) {
+    const sdk = (0, cloudbase_sdk_1.selectCloudBaseSdk)(injected);
     validate(event);
     const app = sdk.init({ env: sdk.SYMBOL_CURRENT_ENV });
     const database = app.database();

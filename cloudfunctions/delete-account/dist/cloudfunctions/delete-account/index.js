@@ -5,6 +5,7 @@ exports.createCloudBaseDeleteRepository = createCloudBaseDeleteRepository;
 exports.createDeleteHandler = createDeleteHandler;
 exports.main = main;
 const account_state_1 = require("../shared/account-state");
+const cloudbase_sdk_1 = require("../shared/cloudbase-sdk");
 exports.PERSONAL_COLLECTIONS = [
     'favorites',
     'imports',
@@ -109,7 +110,8 @@ function createDeleteHandler(deps) {
         return { deleted: { ...result.deleted, users } };
     };
 }
-function main(event, context, sdk = require('@cloudbase/node-sdk')) {
+function main(event, context, injected) {
+    const sdk = (0, cloudbase_sdk_1.selectCloudBaseSdk)(injected);
     const app = sdk.init({ env: sdk.SYMBOL_CURRENT_ENV });
     return createDeleteHandler({
         getOpenId: () => sdk.getCloudbaseContext(context).OPENID,

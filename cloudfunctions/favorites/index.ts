@@ -1,4 +1,5 @@
 import { planFavoriteBatch } from '../../src/domain/favorites'
+import { selectCloudBaseSdk } from '../shared/cloudbase-sdk'
 import {
   createCloudBaseFavoritesRepository,
   type CloudBaseFavoritesDatabase,
@@ -54,8 +55,8 @@ export function createFavoritesHandler(deps: { getOpenId(): string | undefined; 
   }
 }
 
-export const main = (event: Event, context: unknown, sdk: CloudBaseSdk = require('@cloudbase/node-sdk') as CloudBaseSdk) => {
-  const cloudbase = sdk
+export const main = (event: Event, context: unknown, injected?: unknown) => {
+  const cloudbase = selectCloudBaseSdk<CloudBaseSdk>(injected)
   const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV })
   const database = app.database()
   const handler = createFavoritesHandler({

@@ -3,7 +3,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.main = main;
 const amap_routes_1 = require("./amap-routes");
 const rate_limiter_1 = require("./rate-limiter");
-async function main(event, _context, sdk = require('@cloudbase/node-sdk')) {
+const cloudbase_sdk_1 = require("../shared/cloudbase-sdk");
+async function main(event, _context, injected) {
+    const sdk = (0, cloudbase_sdk_1.selectCloudBaseSdk)(injected);
     try {
         if (!event || typeof event !== 'object' || !Array.isArray(event.destinations)
             || !['walking', 'bicycling', 'driving'].includes(event.mode)) {

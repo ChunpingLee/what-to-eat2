@@ -3,6 +3,7 @@ import {
   accountDocumentId,
   type AccountTransaction,
 } from '../shared/account-state'
+import { selectCloudBaseSdk } from '../shared/cloudbase-sdk'
 
 export const PERSONAL_COLLECTIONS = [
   'favorites',
@@ -142,8 +143,9 @@ export function createDeleteHandler(deps: { getOpenId(): string | undefined; rep
 export function main(
   event: unknown,
   context: unknown,
-  sdk: CloudBaseSdk = require('@cloudbase/node-sdk') as CloudBaseSdk,
+  injected?: unknown,
 ) {
+  const sdk = selectCloudBaseSdk<CloudBaseSdk>(injected)
   const app = sdk.init({ env: sdk.SYMBOL_CURRENT_ENV })
   return createDeleteHandler({
     getOpenId: () => sdk.getCloudbaseContext(context).OPENID,

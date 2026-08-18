@@ -2,6 +2,7 @@ import type { Place } from '../../src/domain/favorites'
 import type { GeoPoint } from '../../src/shared/types'
 import { createAmapClient } from '../place-search/amap-client'
 import { createCloudBaseSearchCache, createPlaceSearchService, type CloudBaseCacheDatabase } from '../place-search/cache'
+import { selectCloudBaseSdk } from '../shared/cloudbase-sdk'
 import { parseAmapPage } from './parsers/amap'
 import { parseDianpingPage } from './parsers/dianping'
 import { parseMeituanPage } from './parsers/meituan'
@@ -93,8 +94,9 @@ function centerFrom(value: unknown): GeoPoint | undefined {
 export async function main(
   event: LinkImportEvent,
   _context: unknown,
-  sdk: CloudBaseSdk = require('@cloudbase/node-sdk') as CloudBaseSdk,
+  injected?: unknown,
 ): Promise<ImportResult> {
+  const sdk = selectCloudBaseSdk<CloudBaseSdk>(injected)
   try {
     if (typeof event?.url !== 'string') throw unavailableLink()
     const center = centerFrom(event.center)

@@ -10,5 +10,5 @@
     "rootDir": "../..",
     "outDir": "dist"
   },
-  "include": ["index.ts", "../shared/public-places.ts", "../../src/domain/favorites.ts", "../../src/domain/geo.ts", "../../src/domain/share.ts", "../../src/shared/types.ts"]
+  "include": ["index.ts", "../shared/public-places.ts", "../shared/cloudbase-sdk.ts", "../../src/domain/favorites.ts", "../../src/domain/geo.ts", "../../src/domain/share.ts", "../../src/shared/types.ts"]
 }

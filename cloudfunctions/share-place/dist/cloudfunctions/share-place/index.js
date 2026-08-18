@@ -4,6 +4,7 @@ exports.createSharePayload = createSharePayload;
 exports.createSharePlaceHandler = createSharePlaceHandler;
 exports.main = main;
 const share_1 = require("../../src/domain/share");
+const cloudbase_sdk_1 = require("../shared/cloudbase-sdk");
 const public_places_1 = require("../shared/public-places");
 /** Builds the complete data payload allowed to leave one user's private list. */
 function createSharePayload(input) {
@@ -70,7 +71,8 @@ function createSharePlaceHandler(deps) {
         return { place };
     };
 }
-function main(event, _context, sdk = require('@cloudbase/node-sdk')) {
+function main(event, _context, injected) {
+    const sdk = (0, cloudbase_sdk_1.selectCloudBaseSdk)(injected);
     const app = sdk.init({ env: sdk.SYMBOL_CURRENT_ENV });
     return createSharePlaceHandler({ repo: (0, public_places_1.createCloudBasePublicPlaceStore)(app.database()) })(event);
 }

@@ -19,6 +19,21 @@ const query = {
 const DeployedSafeError = require('../../cloudfunctions/place-search/dist/src/shared/errors.js').SafeError as typeof Error
 
 describe('place search cloud function', () => {
+  it('initializes the deployed search function against the explicit CloudBase environment', async () => {
+    const init = vi.fn().mockReturnValue({ database: () => ({
+      collection: () => ({
+        doc: () => ({ get: async () => ({ data: undefined }), set: async () => undefined }),
+        where: () => ({ limit: () => ({ get: async () => ({ data: [] }) }) }),
+      }),
+    }) })
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    await placeSearchMain({} as never, {}, { SYMBOL_CURRENT_ENV: Symbol('unsupported'), init } as never).catch(() => undefined)
+    errorLog.mockRestore()
+
+    expect(init).toHaveBeenCalledWith({ env: 'cloud1-d9gwjmdaj73a7dc0d' })
+  })
+
   it.each([
     {
       expectedStage: 'SDK_INIT',
@@ -74,10 +89,42 @@ describe('place search cloud function', () => {
     expect(thrown).toMatchObject({ name: 'SafeError', code: expectedCode })
     expect(thrown).toBeInstanceOf(DeployedSafeError)
     const safe = thrown as Error
-    expect(safe.message).toContain('place-search-20260817-node16-v1')
+    expect(safe.message).toContain('place-search-20260818-shared-sdk-v6')
     expect(safe.message).toContain(expectedStage)
     expect(safe.stack).toContain(expectedStage)
     expect(`${safe.message}\n${safe.stack}`).not.toContain('private')
+  })
+
+  it('logs the unexpected module error code and detail for infrastructure failures without leaking them into the thrown error', async () => {
+    const moduleError = Object.assign(
+      new Error("Cannot find module '@cloudbase/node-sdk'"),
+      { code: 'MODULE_NOT_FOUND' },
+    )
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    let thrown: unknown
+    try {
+      await placeSearchMain(query as never, {}, {
+        SYMBOL_CURRENT_ENV: Symbol('current'),
+        init: () => { throw moduleError },
+      } as never)
+    } catch (error) {
+      thrown = error
+    }
+    const loggedCalls = [...errorLog.mock.calls]
+    errorLog.mockRestore()
+
+    const logged = loggedCalls[0]?.[0] as Record<string, unknown>
+    expect(logged).toMatchObject({
+      event: 'PLACE_SEARCH_FAILED',
+      entryStage: 'SDK_INIT',
+      errorCode: 'AMAP_UNAVAILABLE',
+      platformErrorCode: 'MODULE_NOT_FOUND',
+      unexpectedErrorName: 'Error',
+      unexpectedErrorDetail: "Cannot find module '@cloudbase/node-sdk'",
+    })
+    const safe = thrown as Error
+    expect(safe).toMatchObject({ name: 'SafeError', code: 'AMAP_UNAVAILABLE' })
+    expect(`${safe.message}\n${safe.stack}`).not.toContain('Cannot find module')
   })
 
   it('uses the CloudBase server root document contract and reads object, array, and legacy cache shapes', async () => {
