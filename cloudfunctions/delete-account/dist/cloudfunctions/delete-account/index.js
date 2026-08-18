@@ -59,7 +59,7 @@ function createCloudBaseDeleteRepository(database, options = {}) {
                 if (state?.status === 'deleting')
                     return;
                 await account.set({
-                    _id: id, _openid: openid, status: 'deleting', updatedAt: now().toISOString(),
+                    _openid: openid, status: 'deleting', updatedAt: now().toISOString(),
                 });
             });
         },
@@ -114,7 +114,7 @@ function main(event, context, injected) {
     const sdk = (0, cloudbase_sdk_1.selectCloudBaseSdk)(injected);
     const app = sdk.init({ env: sdk.SYMBOL_CURRENT_ENV });
     return createDeleteHandler({
-        getOpenId: () => sdk.getCloudbaseContext(context).OPENID,
+        getOpenId: () => (0, cloudbase_sdk_1.wxContextFromEnv)().OPENID ?? sdk.getCloudbaseContext(context).OPENID,
         repo: createCloudBaseDeleteRepository(app.database()),
     })(event);
 }

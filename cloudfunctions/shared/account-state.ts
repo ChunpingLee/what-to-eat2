@@ -48,6 +48,6 @@ export async function ensureAccountWritable(transaction: AccountTransaction, ope
   const state = accountStateFromDocumentData(result.data)
   if (state?.status === 'deleting') throw new AccountDeletingError()
   if (!state) {
-    await document.set({ _id: id, _openid: openid, status: 'active', updatedAt })
+    await document.set({ _openid: openid, status: 'active', updatedAt })
   }
 }

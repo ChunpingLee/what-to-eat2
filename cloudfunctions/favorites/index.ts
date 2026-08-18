@@ -1,5 +1,5 @@
 import { planFavoriteBatch } from '../../src/domain/favorites'
-import { selectCloudBaseSdk } from '../shared/cloudbase-sdk'
+import { selectCloudBaseSdk, wxContextFromEnv } from '../shared/cloudbase-sdk'
 import {
   createCloudBaseFavoritesRepository,
   type CloudBaseFavoritesDatabase,
@@ -60,7 +60,7 @@ export const main = (event: Event, context: unknown, injected?: unknown) => {
   const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV })
   const database = app.database()
   const handler = createFavoritesHandler({
-    getOpenId: () => cloudbase.getCloudbaseContext(context).OPENID,
+    getOpenId: () => wxContextFromEnv().OPENID ?? cloudbase.getCloudbaseContext(context).OPENID,
     repo: createCloudBaseFavoritesRepository(database, poiIds => database.command.in(poiIds)),
   })
   return handler(event)

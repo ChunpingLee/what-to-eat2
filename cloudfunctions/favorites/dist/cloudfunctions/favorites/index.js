@@ -32,7 +32,7 @@ const main = (event, context, injected) => {
     const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV });
     const database = app.database();
     const handler = createFavoritesHandler({
-        getOpenId: () => cloudbase.getCloudbaseContext(context).OPENID,
+        getOpenId: () => (0, cloudbase_sdk_1.wxContextFromEnv)().OPENID ?? cloudbase.getCloudbaseContext(context).OPENID,
         repo: (0, repository_1.createCloudBaseFavoritesRepository)(database, poiIds => database.command.in(poiIds)),
     });
     return handler(event);

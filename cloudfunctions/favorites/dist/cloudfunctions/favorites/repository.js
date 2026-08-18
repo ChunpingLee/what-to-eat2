@@ -62,13 +62,24 @@ function createCloudBaseFavoritesRepository(database, inQuery = poiIds => ({ $in
                 const found = await favorite.get();
                 if (favoriteDocuments(found.data).some(value => value.poiId === poiId))
                     return { poiId, status: 'existing' };
-                await favorite.set({ _id: id, poiId, _openid: openid, createdAt });
+                await favorite.set({ poiId, _openid: openid, createdAt });
                 return { poiId, status: 'created' };
             })));
             const deleting = outcomes.find((outcome) => outcome.status === 'rejected'
                 && outcome.reason instanceof account_state_1.AccountDeletingError);
             if (deleting)
                 throw deleting.reason;
+            for (const outcome of outcomes) {
+                if (outcome.status !== 'rejected')
+                    continue;
+                const reason = outcome.reason;
+                console.error({
+                    event: 'FAVORITE_INSERT_REJECTED',
+                    reasonCode: typeof reason.code === 'string' ? reason.code : undefined,
+                    reasonName: typeof reason.name === 'string' ? reason.name : undefined,
+                    reasonMessage: typeof reason.message === 'string' ? reason.message.slice(0, 200) : undefined,
+                });
+            }
             const successful = outcomes.flatMap(outcome => outcome.status === 'fulfilled' ? [outcome.value] : []);
             return {
                 created: successful.filter(outcome => outcome.status === 'created').map(outcome => outcome.poiId),

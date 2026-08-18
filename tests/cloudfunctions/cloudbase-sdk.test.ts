@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   resolveCloudBaseSdk,
   selectCloudBaseSdk,
+  wxContextFromEnv,
 } from '../../cloudfunctions/shared/cloudbase-sdk'
 
 describe('shared cloudbase sdk selection', () => {
@@ -29,5 +30,19 @@ describe('shared cloudbase sdk selection', () => {
 
     expect(rejected).toBe(loadedModule)
     expect(loggedCalls[0]?.[0]).toMatchObject({ event: 'SDK_ARG_REJECTED', argType: 'function' })
+  })
+
+  it('reads the WeChat caller context with the WX_ prefix stripped and secrets excluded', () => {
+    expect(wxContextFromEnv({
+      WX_CONTEXT_KEYS: 'WX_OPENID,WX_APPID,WX_UNIONID,WX_API_TOKEN,API_TOKEN,CLIENTIP,UNDECLARED',
+      WX_OPENID: 'o-user',
+      WX_APPID: 'wx-app',
+      WX_UNIONID: 'o-union',
+      WX_API_TOKEN: 'secret-token',
+      API_TOKEN: 'secret-token',
+      CLIENTIP: '1.2.3.4',
+    })).toEqual({ OPENID: 'o-user', APPID: 'wx-app', UNIONID: 'o-union', CLIENTIP: '1.2.3.4' })
+
+    expect(wxContextFromEnv({})).toEqual({})
   })
 })

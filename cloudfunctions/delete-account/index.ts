@@ -3,7 +3,7 @@ import {
   accountDocumentId,
   type AccountTransaction,
 } from '../shared/account-state'
-import { selectCloudBaseSdk } from '../shared/cloudbase-sdk'
+import { selectCloudBaseSdk, wxContextFromEnv } from '../shared/cloudbase-sdk'
 
 export const PERSONAL_COLLECTIONS = [
   'favorites',
@@ -93,7 +93,7 @@ export function createCloudBaseDeleteRepository(
         const state = accountStateFromDocumentData(result.data)
         if (state?.status === 'deleting') return
         await account.set({
-          _id: id, _openid: openid, status: 'deleting', updatedAt: now().toISOString(),
+          _openid: openid, status: 'deleting', updatedAt: now().toISOString(),
         })
       })
     },
@@ -148,7 +148,7 @@ export function main(
   const sdk = selectCloudBaseSdk<CloudBaseSdk>(injected)
   const app = sdk.init({ env: sdk.SYMBOL_CURRENT_ENV })
   return createDeleteHandler({
-    getOpenId: () => sdk.getCloudbaseContext(context).OPENID,
+    getOpenId: () => wxContextFromEnv().OPENID ?? sdk.getCloudbaseContext(context).OPENID,
     repo: createCloudBaseDeleteRepository(app.database()),
   })(event)
 }

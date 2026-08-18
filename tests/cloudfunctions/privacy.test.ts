@@ -302,7 +302,12 @@ function accountLifecycleDatabase() {
   let queue: Promise<unknown> = Promise.resolve()
   const doc = (name: typeof names[number], id: string) => ({
     get: async () => ({ data: records[name].get(id) }),
-    set: async (body: Record<string, unknown>) => { records[name].set(id, body) },
+    set: async (body: Record<string, unknown>) => {
+      if (Object.prototype.hasOwnProperty.call(body, '_id')) {
+        throw { code: 'INVALID_PARAM', message: '不能更新_id的值' }
+      }
+      records[name].set(id, { ...body, _id: id })
+    },
     remove: async () => { records[name].delete(id) },
   })
   return {

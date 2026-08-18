@@ -197,8 +197,11 @@ function transactionalFavoritesDatabase(failingPoiId?: string) {
     doc: (id: string) => ({
       get: async () => ({ data: records[name].get(id) }),
       set: async (body: Record<string, unknown>) => {
+        if (Object.prototype.hasOwnProperty.call(body, '_id')) {
+          throw { code: 'INVALID_PARAM', message: '不能更新_id的值' }
+        }
         if (name === 'favorites' && body.poiId === failingPoiId) throw { code: 'DATABASE_PERMISSION_DENIED' }
-        records[name].set(id, body)
+        records[name].set(id, { ...body, _id: id })
       },
       remove: async () => { records[name].delete(id) },
     }),

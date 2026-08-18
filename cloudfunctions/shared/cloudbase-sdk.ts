@@ -33,3 +33,29 @@ export function selectCloudBaseSdk<Sdk>(
   if (injected !== undefined) console.error({ event: 'SDK_ARG_REJECTED', argType: typeof injected })
   return resolveCloudBaseSdk<Sdk>(load())
 }
+
+const WX_PREFIX = 'WX_'
+const CONTEXT_KEYS_BLACKLIST = ['API_TOKEN', 'TRIGGER_API_TOKEN_V0']
+
+/**
+ * Reads the per-invocation WeChat caller context from environment variables, mirroring
+ * wx-server-sdk's getWXContext(): the runtime lists injected keys in WX_CONTEXT_KEYS
+ * (prefixed like WX_OPENID) and this exposes them with the prefix stripped (OPENID).
+ * @cloudbase/node-sdk's getCloudbaseContext does NOT strip the prefix, so its `.OPENID`
+ * is always undefined in WeChat cloud functions.
+ */
+export function wxContextFromEnv(
+  env: Record<string, string | undefined> = process.env,
+): Record<string, string> {
+  const result: Record<string, string> = {}
+  const declared = env.WX_CONTEXT_KEYS
+  if (!declared) return result
+  for (const key of declared.split(',')) {
+    if (!key) continue
+    if (CONTEXT_KEYS_BLACKLIST.some(blacklisted => key === blacklisted || WX_PREFIX + blacklisted === key)) continue
+    const value = env[key]
+    if (value === undefined) continue
+    result[key.startsWith(WX_PREFIX) && key.length > WX_PREFIX.length ? key.slice(WX_PREFIX.length) : key] = value
+  }
+  return result
+}

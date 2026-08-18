@@ -34,6 +34,6 @@ async function ensureAccountWritable(transaction, openid, updatedAt) {
     if (state?.status === 'deleting')
         throw new AccountDeletingError();
     if (!state) {
-        await document.set({ _id: id, _openid: openid, status: 'active', updatedAt });
+        await document.set({ _openid: openid, status: 'active', updatedAt });
     }
 }
