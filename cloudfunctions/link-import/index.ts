@@ -7,6 +7,7 @@ import { parseAmapPage } from './parsers/amap'
 import { parseDianpingPage } from './parsers/dianping'
 import { parseMeituanPage } from './parsers/meituan'
 import type { PlaceHint } from './parsers/shared'
+import { parseShareText } from './share-text'
 import { createCloudBasePublicPlaceStore, type PublicPlacesDatabase } from '../shared/public-places'
 import {
   LinkImportError,
@@ -14,6 +15,7 @@ import {
   parseAllowedUrl,
   platformForUrl,
   unavailableLink,
+  unsupportedLink,
   type FetchedPage,
 } from './url-policy'
 
@@ -39,7 +41,24 @@ function safeError(error: unknown): LinkImportError {
 }
 
 export function createLinkImporter(deps: LinkImporterDependencies) {
-  return async (url: string): Promise<ImportResult> => {
+  return async (input: string): Promise<ImportResult> => {
+    const share = parseShareText(input)
+    if (!share || !share.url && !share.name) throw unsupportedLink()
+
+    // Meituan/Dianping shop pages block server-side fetches, but the bracketed shop name in
+    // the pasted share message is already enough for the POI matcher and the search fallback.
+    if (share.name) {
+      try {
+        const unique = [...new Map((await deps.matchPlaces({ name: share.name }))
+          .map(candidate => [candidate.poiId, candidate])).values()]
+        if (unique.length) return { status: 'matched', candidates: unique }
+      } catch {
+        // A failed POI lookup still leaves a safe keyword for the existing search page.
+      }
+      return { status: 'search', keywords: share.name }
+    }
+
+    const url = share.url!
     parseAllowedUrl(url)
     let page: FetchedPage
     try {

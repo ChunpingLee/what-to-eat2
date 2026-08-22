@@ -34,6 +34,8 @@ const PLATFORM_BY_HOST = new Map([
     ['m.meituan.com', 'meituan'],
     ['www.dianping.com', 'dianping'],
     ['m.dianping.com', 'dianping'],
+    ['dpurl.cn', 'dianping'],
+    ['w.dianping.com', 'dianping'],
     ['www.amap.com', 'amap'],
     ['ditu.amap.com', 'amap'],
 ]);

@@ -9,6 +9,7 @@ const cloudbase_sdk_1 = require("../shared/cloudbase-sdk");
 const amap_1 = require("./parsers/amap");
 const dianping_1 = require("./parsers/dianping");
 const meituan_1 = require("./parsers/meituan");
+const share_text_1 = require("./share-text");
 const public_places_1 = require("../shared/public-places");
 const url_policy_1 = require("./url-policy");
 function parserFor(url) {
@@ -23,7 +24,25 @@ function safeError(error) {
     return error instanceof url_policy_1.LinkImportError ? error : (0, url_policy_1.unavailableLink)();
 }
 function createLinkImporter(deps) {
-    return async (url) => {
+    return async (input) => {
+        const share = (0, share_text_1.parseShareText)(input);
+        if (!share || !share.url && !share.name)
+            throw (0, url_policy_1.unsupportedLink)();
+        // Meituan/Dianping shop pages block server-side fetches, but the bracketed shop name in
+        // the pasted share message is already enough for the POI matcher and the search fallback.
+        if (share.name) {
+            try {
+                const unique = [...new Map((await deps.matchPlaces({ name: share.name }))
+                        .map(candidate => [candidate.poiId, candidate])).values()];
+                if (unique.length)
+                    return { status: 'matched', candidates: unique };
+            }
+            catch {
+                // A failed POI lookup still leaves a safe keyword for the existing search page.
+            }
+            return { status: 'search', keywords: share.name };
+        }
+        const url = share.url;
         (0, url_policy_1.parseAllowedUrl)(url);
         let page;
         try {

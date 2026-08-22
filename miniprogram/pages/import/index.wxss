@@ -6,3 +6,4 @@
 .secondary { margin-top: 20rpx; background: #f2f4f7; color: #344054; }
 .result { margin-top: 32rpx; }
 .error { margin-top: 24rpx; color: #b42318; }
+.share-input { min-height: 120rpx; width: 100%; line-height: 1.5; }

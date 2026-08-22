@@ -13,6 +13,7 @@
   "include": [
     "index.ts",
     "url-policy.ts",
+    "share-text.ts",
     "parsers/**/*.ts",
     "../place-search/amap-client.ts",
     "../place-search/cache.ts",

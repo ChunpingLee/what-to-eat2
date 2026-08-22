@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { Place } from '../../src/domain/favorites'
 import { createLinkImporter } from '../../cloudfunctions/link-import/index'
+import { parseShareText } from '../../cloudfunctions/link-import/share-text'
 import {
   MAX_RESPONSE_BYTES,
   createPinnedHttpsRequest,
@@ -72,6 +73,8 @@ describe('link import URL policy', () => {
     ['美团', 'https://m.meituan.com/meishi/123'],
     ['点评', 'https://www.dianping.com/shop/abc'],
     ['点评', 'https://m.dianping.com/shop/abc'],
+    ['点评', 'https://dpurl.cn/QKRQmerz'],
+    ['点评', 'https://w.dianping.com/cube/evoke/meituan.html?url=x'],
     ['高德', 'https://www.amap.com/place/xyz'],
     ['高德', 'https://ditu.amap.com/place/xyz'],
   ])('accepts the explicit %s share host %s and resolves it before connecting', async (_platform, url) => {
@@ -268,6 +271,37 @@ describe('link import URL policy', () => {
   })
 })
 
+describe('share text extraction', () => {
+  it('reads the bracketed shop name and the normalized https url from a pasted Meituan share message', () => {
+    expect(parseShareText('【示例火锅（静安店）】超值双人餐快来抢购 http://dpurl.cn/QKRQmerz'))
+      .toEqual({ url: 'https://dpurl.cn/QKRQmerz', name: '示例火锅（静安店）' })
+    expect(parseShareText('「某某烤肉」好吃的 https://m.dianping.com/shopinfo/k60XNhiYbUuyG6c4?cityid=1'))
+      .toEqual({ url: 'https://m.dianping.com/shopinfo/k60XNhiYbUuyG6c4?cityid=1', name: '某某烤肉' })
+  })
+
+  it('normalizes scheme-less and plain-http pastes to https', () => {
+    expect(parseShareText('dpurl.cn/QKRQmerz')).toEqual({ url: 'https://dpurl.cn/QKRQmerz' })
+    expect(parseShareText('http://dpurl.cn/QKRQmerz')).toEqual({ url: 'https://dpurl.cn/QKRQmerz' })
+    expect(parseShareText('https://www.amap.com/place/B0FF0123X4')).toEqual({ url: 'https://www.amap.com/place/B0FF0123X4' })
+  })
+
+  it('skips non-platform urls and keeps the first supported link in free text', () => {
+    expect(parseShareText('先看看 https://s.taobao.com/abcd 再看 dpurl.cn/QKRQmerz，结尾')).toEqual({
+      url: 'https://dpurl.cn/QKRQmerz',
+    })
+  })
+
+  it('returns the name alone when the message has no supported link', () => {
+    expect(parseShareText('【示例火锅】约饭')).toEqual({ name: '示例火锅' })
+  })
+
+  it('ignores bracketed fragments that contain urls and rejects text without any name or supported link', () => {
+    expect(parseShareText('【https://dpurl.cn/x】描述')).toEqual({ url: 'https://dpurl.cn/x' })
+    expect(parseShareText('今晚吃什么')).toBeUndefined()
+    expect(parseShareText('')).toBeUndefined()
+  })
+})
+
 describe('link import parsing and fallback', () => {
   it.each([
     ['https://www.meituan.com/meishi/1', '<meta property="og:title" content="示例火锅（静安店）"><meta name="description" content="上海市静安区示例路1号">', '示例火锅（静安店）'],
@@ -322,6 +356,52 @@ describe('link import parsing and fallback', () => {
       code: 'LINK_UNAVAILABLE', message: 'Link import is temporarily unavailable',
     })
     await expect(importLink('https://www.dianping.com/shop/abc')).rejects.not.toThrow('secret')
+  })
+
+  it('imports from the bracketed name in a share message without fetching the gated page', async () => {
+    const fetchPage = vi.fn()
+    const matchPlaces = vi.fn().mockResolvedValue([place('p1')])
+    const importLink = createLinkImporter({ fetchPage, matchPlaces })
+
+    await expect(importLink('【示例火锅（静安店）】超值双人餐 http://dpurl.cn/QKRQmerz')).resolves.toEqual({
+      status: 'matched', candidates: [place('p1')],
+    })
+    expect(fetchPage).not.toHaveBeenCalled()
+    expect(matchPlaces).toHaveBeenCalledWith({ name: '示例火锅（静安店）' })
+  })
+
+  it('falls back to keyword search from the share-message name when no POI matches', async () => {
+    const fetchPage = vi.fn()
+    const importLink = createLinkImporter({ fetchPage, matchPlaces: vi.fn().mockResolvedValue([]) })
+
+    await expect(importLink('【示例火锅】快来 https://m.dianping.com/shopinfo/k60XNhiYbUuyG6c4')).resolves.toEqual({
+      status: 'search', keywords: '示例火锅',
+    })
+    expect(fetchPage).not.toHaveBeenCalled()
+  })
+
+  it('upgrades a pasted http dpurl link and degrades to manual entry when the landing page carries no name', async () => {
+    const fetchPage = vi.fn().mockResolvedValue({
+      url: 'https://w.dianping.com/cube/evoke/meituan.html?url=x',
+      body: '<html><body>app evoke shell without a shop name</body></html>',
+    })
+    const importLink = createLinkImporter({ fetchPage, matchPlaces: vi.fn() })
+
+    await expect(importLink('http://dpurl.cn/QKRQmerz')).resolves.toEqual({ status: 'manual' })
+    expect(fetchPage).toHaveBeenCalledWith('https://dpurl.cn/QKRQmerz')
+  })
+
+  it('answers keyword search for a pasted message that only carries the bracketed name', async () => {
+    const fetchPage = vi.fn()
+    const importLink = createLinkImporter({ fetchPage, matchPlaces: vi.fn().mockRejectedValue(new Error('boom')) })
+
+    await expect(importLink('【示例火锅】约饭')).resolves.toEqual({ status: 'search', keywords: '示例火锅' })
+    expect(fetchPage).not.toHaveBeenCalled()
+  })
+
+  it('rejects pasted text without any supported link or bracketed name', async () => {
+    const importLink = createLinkImporter({ fetchPage: vi.fn(), matchPlaces: vi.fn() })
+    await expect(importLink('今晚吃什么')).rejects.toMatchObject({ code: 'UNSUPPORTED_LINK' })
   })
 
   it('provides a deployable CloudBase entrypoint', () => {
