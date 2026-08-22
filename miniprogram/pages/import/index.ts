@@ -77,7 +77,8 @@ if (typeof Page === 'function') {
         return
       }
       if (result.status === 'manual') { this.setData({ status: 'manual' }); return }
-      const existing = new Set((await listFavorites()).map(item => item.poiId))
+      let existing = new Set<string>()
+      try { existing = new Set((await listFavorites()).map(item => item.poiId)) } catch { /* best-effort existing marks; addBatch dedupes server-side */ }
       const branches = result.candidates.map(place => ({
         ...place,
         distanceMeters: center ? Math.round(distanceMeters(center, place.location)) : 0,
