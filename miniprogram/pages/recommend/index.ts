@@ -39,8 +39,12 @@ interface InputEvent { detail: { value?: unknown } }
 
 interface RecommendationPage {
   data: RecommendationData
+  /** Non-reactive input store: writing here never re-renders, so iOS same-layer inputs keep their text. */
+  values?: { keywords: string; budgetMin: string; budgetMax: string; maxMinutes: string }
   setData(data: Partial<RecommendationData>): void
+  onLoad(): void
   onCategory(event: DatasetEvent): void
+  onKeywordFocus(): void
   onKeywordInput(event: InputEvent): void
   onRandom(): void
   onBudgetMinInput(event: InputEvent): void
@@ -197,17 +201,24 @@ if (typeof Page === 'function') {
   Page<RecommendationPage>({
     data: initialData,
 
+    onLoad(this: RecommendationPage) {
+      this.values = { keywords: '', budgetMin: '', budgetMax: '', maxMinutes: '30' }
+    },
+
     onCategory(this: RecommendationPage, event: DatasetEvent) {
       const category = textValue(event.currentTarget.dataset.category)
       this.setData({ preferenceMode: 'category', category, categoryOptions: categoryOptions(category) })
     },
 
+    onKeywordFocus(this: RecommendationPage) {
+      // Switch preference mode on focus (before typing) — setData during composition clears iOS inputs.
+      if (this.data.preferenceMode !== 'keywords') {
+        this.setData({ preferenceMode: 'keywords', categoryOptions: categoryOptions(this.data.category, false) })
+      }
+    },
+
     onKeywordInput(this: RecommendationPage, event: InputEvent) {
-      this.setData({
-        preferenceMode: 'keywords',
-        keywords: textValue(event.detail.value),
-        categoryOptions: categoryOptions(this.data.category, false),
-      })
+      this.values!.keywords = textValue(event.detail.value)
     },
 
     onRandom(this: RecommendationPage) {
@@ -215,15 +226,15 @@ if (typeof Page === 'function') {
     },
 
     onBudgetMinInput(this: RecommendationPage, event: InputEvent) {
-      this.setData({ budgetMin: textValue(event.detail.value) })
+      this.values!.budgetMin = textValue(event.detail.value)
     },
 
     onBudgetMaxInput(this: RecommendationPage, event: InputEvent) {
-      this.setData({ budgetMax: textValue(event.detail.value) })
+      this.values!.budgetMax = textValue(event.detail.value)
     },
 
     onMaxMinutesInput(this: RecommendationPage, event: InputEvent) {
-      this.setData({ maxMinutes: textValue(event.detail.value) })
+      this.values!.maxMinutes = textValue(event.detail.value)
     },
 
     onRadius(this: RecommendationPage, event: DatasetEvent) {
@@ -251,7 +262,7 @@ if (typeof Page === 'function') {
     beginRecommendation(this: RecommendationPage, locate: typeof getCurrentLocation) {
       if (this.data.status === 'loading') return
       const intent = controller.beginIntent()
-      const input = buildRecommendationInput(this.data)
+      const input = buildRecommendationInput({ ...this.data, ...this.values! })
       if (input.random === false && !input.category && !input.keywords) {
         this.setData({ status: 'error', errorMessage: '请输入想吃的关键词' })
         return
