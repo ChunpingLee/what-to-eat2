@@ -12,8 +12,6 @@ import { getCurrentLocation } from '../../services/location'
 type ImportStatus = 'idle' | 'importing' | 'matched' | 'search' | 'manual' | 'error'
 
 interface ImportData {
-  url: string
-  city: string
   status: ImportStatus
   branches: BranchItem[]
   selectedPoiIds: string[]
@@ -28,7 +26,10 @@ interface PickerEvent { detail: { poiIds?: unknown } }
 
 interface ImportPage {
   data: ImportData
+  /** Non-reactive input store: writing here never re-renders, so iOS same-layer inputs keep their text. */
+  values?: { url: string; city: string }
   setData(data: Partial<ImportData>): void
+  onLoad(): void
   onUrlInput(event: InputEvent): void
   onCityInput(event: InputEvent): void
   onImport(): Promise<void>
@@ -52,15 +53,17 @@ export function buildSearchUrl(keywords: string, city: string) {
 if (typeof Page === 'function') {
   Page<ImportPage>({
     data: {
-      url: '', city: '', status: 'idle', branches: [], selectedPoiIds: [], submitting: false,
+      status: 'idle', branches: [], selectedPoiIds: [], submitting: false,
       keywords: '', searchUrl: '/pages/place-search/index', errorMessage: '',
     },
 
-    onUrlInput(this: ImportPage, event: InputEvent) { this.setData({ url: inputText(event.detail.value) }) },
-    onCityInput(this: ImportPage, event: InputEvent) { this.setData({ city: inputText(event.detail.value) }) },
+    onLoad(this: ImportPage) { this.values = { url: '', city: '' } },
+
+    onUrlInput(this: ImportPage, event: InputEvent) { this.values!.url = inputText(event.detail.value) },
+    onCityInput(this: ImportPage, event: InputEvent) { this.values!.city = inputText(event.detail.value) },
 
     async onImport(this: ImportPage) {
-      const url = this.data.url.trim()
+      const url = this.values!.url.trim()
       if (!url) { this.setData({ status: 'error', errorMessage: '请粘贴分享链接' }); return }
       this.setData({ status: 'importing', branches: [], selectedPoiIds: [], errorMessage: '' })
       let center: GeoPoint | undefined
@@ -69,7 +72,7 @@ if (typeof Page === 'function') {
         await this.publishResult(await importSharedLink({
           url,
           ...(center ? { center } : {}),
-          ...(this.data.city.trim() ? { city: this.data.city.trim() } : {}),
+          ...(this.values!.city.trim() ? { city: this.values!.city.trim() } : {}),
         }), center)
       } catch {
         this.setData({ status: 'error', errorMessage: '链接导入失败，请检查链接后重试' })
@@ -79,7 +82,7 @@ if (typeof Page === 'function') {
     async publishResult(this: ImportPage, result: LinkImportResult, center?: GeoPoint) {
       if (result.status === 'search') {
         const keywords = result.keywords
-        this.setData({ status: 'search', keywords, searchUrl: buildSearchUrl(keywords, this.data.city) })
+        this.setData({ status: 'search', keywords, searchUrl: buildSearchUrl(keywords, this.values!.city) })
         return
       }
       if (result.status === 'manual') { this.setData({ status: 'manual' }); return }

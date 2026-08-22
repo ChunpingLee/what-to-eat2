@@ -23,6 +23,8 @@ interface PickerEvent { detail: { poiIds?: unknown } }
 
 interface PlaceSearchPage {
   data: PlaceSearchData
+  /** Non-reactive input store: writing here never re-renders, so iOS same-layer inputs keep their text. */
+  values?: { keywords: string; city: string }
   setData(data: Partial<PlaceSearchData>): void
   onLoad(options: Record<string, unknown>): void
   onKeywordInput(event: InputEvent): void
@@ -138,6 +140,7 @@ if (typeof Page === 'function') {
 
     onLoad(this: PlaceSearchPage, options: Record<string, unknown>) {
       const prefill = searchPrefill(options)
+      this.values = { keywords: prefill.keywords, city: prefill.city }
       if (prefill.keywords || prefill.city) this.setData(prefill)
       void controller.refreshFavorites().catch(error => {
         if (this.data.status === 'idle') {
@@ -147,16 +150,16 @@ if (typeof Page === 'function') {
     },
 
     onKeywordInput(this: PlaceSearchPage, event: InputEvent) {
-      this.setData({ keywords: textValue(event.detail.value) })
+      this.values!.keywords = textValue(event.detail.value)
     },
 
     onCityInput(this: PlaceSearchPage, event: InputEvent) {
-      this.setData({ city: textValue(event.detail.value) })
+      this.values!.city = textValue(event.detail.value)
     },
 
     onSearch(this: PlaceSearchPage) {
       const intent = controller.beginIntent()
-      if (!this.data.keywords.trim() || !this.data.city.trim()) {
+      if (!this.values!.keywords.trim() || !this.values!.city.trim()) {
         this.setData({ status: 'error', errorMessage: '请填写餐厅名称和城市' })
         return
       }
@@ -165,7 +168,7 @@ if (typeof Page === 'function') {
 
     onManualLocation(this: PlaceSearchPage) {
       const intent = controller.beginIntent()
-      if (!this.data.keywords.trim() || !this.data.city.trim()) {
+      if (!this.values!.keywords.trim() || !this.values!.city.trim()) {
         this.setData({ status: 'error', errorMessage: '请填写餐厅名称和城市' })
         return
       }
@@ -174,7 +177,7 @@ if (typeof Page === 'function') {
 
     beginSearch(this: PlaceSearchPage, intent: number, locate: () => Promise<GeoPoint>) {
       const input: PlaceSearchInput = {
-        keywords: this.data.keywords.trim(), city: this.data.city.trim(), radiusMeters: 5_000,
+        keywords: this.values!.keywords.trim(), city: this.values!.city.trim(), radiusMeters: 5_000,
       }
       this.setData({ status: 'searching', branches: [], selectedPoiIds: [], errorMessage: '', stale: false })
       void controller.locateAndSearch(intent, input, locate).then(result => {

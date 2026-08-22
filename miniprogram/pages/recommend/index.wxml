@@ -8,7 +8,7 @@
       <button wx:for="{{categoryOptions}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-category="{{item.value}}" bindtap="onCategory">{{item.label}}</button>
     </view>
     <view class="section-title">任意关键词</view>
-    <input class="input" placeholder="例如：潮汕牛肉火锅" bindinput="onKeywordInput" />
+    <input class="input" placeholder="例如：潮汕牛肉火锅" bindfocus="onKeywordFocus" bindinput="onKeywordInput" />
     <button class="random {{preferenceMode === 'random' ? 'selected' : ''}}" bindtap="onRandom">随便吃</button>
   </view>
 
