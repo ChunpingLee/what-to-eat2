@@ -42,6 +42,13 @@ function ids(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
 }
 
+// URLSearchParams is a Web API absent from the Mini Program appservice runtime.
+export function buildSearchUrl(keywords: string, city: string) {
+  const trimmed = city.trim()
+  const query = `keywords=${encodeURIComponent(keywords)}` + (trimmed ? `&city=${encodeURIComponent(trimmed)}` : '')
+  return `/pages/place-search/index?${query}`
+}
+
 if (typeof Page === 'function') {
   Page<ImportPage>({
     data: {
@@ -72,8 +79,7 @@ if (typeof Page === 'function') {
     async publishResult(this: ImportPage, result: LinkImportResult, center?: GeoPoint) {
       if (result.status === 'search') {
         const keywords = result.keywords
-        const params = new URLSearchParams({ keywords, ...(this.data.city.trim() ? { city: this.data.city.trim() } : {}) })
-        this.setData({ status: 'search', keywords, searchUrl: `/pages/place-search/index?${params}` })
+        this.setData({ status: 'search', keywords, searchUrl: buildSearchUrl(keywords, this.data.city) })
         return
       }
       if (result.status === 'manual') { this.setData({ status: 'manual' }); return }
