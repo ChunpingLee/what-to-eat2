@@ -8,16 +8,16 @@
       <button wx:for="{{categoryOptions}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-category="{{item.value}}" bindtap="onCategory">{{item.label}}</button>
     </view>
     <view class="section-title">任意关键词</view>
-    <input class="input" placeholder="例如：潮汕牛肉火锅" value="{{keywords}}" bindinput="onKeywordInput" />
+    <input class="input" placeholder="例如：潮汕牛肉火锅" bindinput="onKeywordInput" />
     <button class="random {{preferenceMode === 'random' ? 'selected' : ''}}" bindtap="onRandom">随便吃</button>
   </view>
 
   <view class="section">
     <view class="section-title">预算（人均，可选）</view>
     <view class="row">
-      <input class="number-input" type="number" placeholder="最低" value="{{budgetMin}}" bindinput="onBudgetMinInput" />
+      <input class="number-input" type="number" placeholder="最低" bindinput="onBudgetMinInput" />
       <text class="separator">至</text>
-      <input class="number-input" type="number" placeholder="最高" value="{{budgetMax}}" bindinput="onBudgetMaxInput" />
+      <input class="number-input" type="number" placeholder="最高" bindinput="onBudgetMaxInput" />
     </view>
 
     <view class="section-title">范围</view>
@@ -31,7 +31,7 @@
     </view>
 
     <view class="section-title">最长时间（分钟，可选）</view>
-    <input class="input" type="number" placeholder="例如：30" value="{{maxMinutes}}" bindinput="onMaxMinutesInput" />
+    <input class="input" type="number" placeholder="例如：30" bindinput="onMaxMinutesInput" />
   </view>
 
   <button class="primary" loading="{{status === 'loading'}}" disabled="{{status === 'loading'}}" bindtap="onRecommend">用当前位置推荐</button>
