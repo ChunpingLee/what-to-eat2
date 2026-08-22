@@ -34,6 +34,8 @@ const PLATFORM_BY_HOST: ReadonlyMap<string, LinkPlatform> = new Map([
   ['w.dianping.com', 'dianping'],
   ['www.amap.com', 'amap'],
   ['ditu.amap.com', 'amap'],
+  ['uri.amap.com', 'amap'],
+  ['surl.amap.com', 'amap'],
 ])
 
 export function parseAllowedUrl(input: string | URL): URL {
