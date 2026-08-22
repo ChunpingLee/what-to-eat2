@@ -77,6 +77,8 @@ describe('link import URL policy', () => {
     ['点评', 'https://w.dianping.com/cube/evoke/meituan.html?url=x'],
     ['高德', 'https://www.amap.com/place/xyz'],
     ['高德', 'https://ditu.amap.com/place/xyz'],
+    ['高德', 'https://uri.amap.com/marker?position=116.3,39.9&src=share'],
+    ['高德', 'https://surl.amap.com/kiaY4iCd0ek'],
   ])('accepts the explicit %s share host %s and resolves it before connecting', async (_platform, url) => {
     await expect(resolveAllowedUrl(url, publicLookup)).resolves.toMatchObject({
       url: new URL(url), address: '93.184.216.34', family: 4,
@@ -279,6 +281,26 @@ describe('share text extraction', () => {
       .toEqual({ url: 'https://m.dianping.com/shopinfo/k60XNhiYbUuyG6c4?cityid=1', name: '某某烤肉' })
   })
 
+  it('reads the bracketed name from a multi-line Dianping share card with rating and price lines', () => {
+    expect(parseShareText(
+      '【懂你吉林烧烤·小龙虾·东北菜(广兰路店)】\n★★★★☆ 4.1\n¥71/人\n张江商圈 烤串\n青桐路618弄40号\n'
+      + 'https://m.dianping.com/shopinfo/H1Lvn7mz3qFITNcj?msource=Appshare2021&utm_source=shop_share&shoptype=10&shopcategoryid=4449&cityid=1&isoversea=0',
+    )).toEqual({
+      url: 'https://m.dianping.com/shopinfo/H1Lvn7mz3qFITNcj?msource=Appshare2021&utm_source=shop_share&shoptype=10&shopcategoryid=4449&cityid=1&isoversea=0',
+      name: '懂你吉林烧烤·小龙虾·东北菜(广兰路店)',
+    })
+  })
+
+  it('falls back to the unbracketed first-line shop name of an AMap share message', () => {
+    expect(parseShareText('懂你吉林烧烤·小龙虾·东北菜(广兰路店)\n¥62/人·烤肉\n张江镇青铜路720号1层-1室\nhttps://surl.amap.com/kiaY4iCd0ek'))
+      .toEqual({ url: 'https://surl.amap.com/kiaY4iCd0ek', name: '懂你吉林烧烤·小龙虾·东北菜(广兰路店)' })
+  })
+
+  it('does not treat price or address lines as the shop name for AMap messages without a name line', () => {
+    expect(parseShareText('¥62/人·烤肉\nhttps://surl.amap.com/kiaY4iCd0ek'))
+      .toEqual({ url: 'https://surl.amap.com/kiaY4iCd0ek' })
+  })
+
   it('normalizes scheme-less and plain-http pastes to https', () => {
     expect(parseShareText('dpurl.cn/QKRQmerz')).toEqual({ url: 'https://dpurl.cn/QKRQmerz' })
     expect(parseShareText('http://dpurl.cn/QKRQmerz')).toEqual({ url: 'https://dpurl.cn/QKRQmerz' })
@@ -368,6 +390,17 @@ describe('link import parsing and fallback', () => {
     })
     expect(fetchPage).not.toHaveBeenCalled()
     expect(matchPlaces).toHaveBeenCalledWith({ name: '示例火锅（静安店）' })
+  })
+
+  it('imports an AMap share message from its first-line name without fetching the short link', async () => {
+    const fetchPage = vi.fn()
+    const matchPlaces = vi.fn().mockResolvedValue([place('p1')])
+    const importLink = createLinkImporter({ fetchPage, matchPlaces })
+
+    await expect(importLink('懂你吉林烧烤·小龙虾·东北菜(广兰路店)\n¥62/人·烤肉\n张江镇青铜路720号1层-1室\nhttps://surl.amap.com/kiaY4iCd0ek'))
+      .resolves.toEqual({ status: 'matched', candidates: [place('p1')] })
+    expect(fetchPage).not.toHaveBeenCalled()
+    expect(matchPlaces).toHaveBeenCalledWith({ name: '懂你吉林烧烤·小龙虾·东北菜(广兰路店)' })
   })
 
   it('falls back to keyword search from the share-message name when no POI matches', async () => {

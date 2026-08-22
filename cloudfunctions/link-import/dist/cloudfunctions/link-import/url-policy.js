@@ -38,6 +38,8 @@ const PLATFORM_BY_HOST = new Map([
     ['w.dianping.com', 'dianping'],
     ['www.amap.com', 'amap'],
     ['ditu.amap.com', 'amap'],
+    ['uri.amap.com', 'amap'],
+    ['surl.amap.com', 'amap'],
 ]);
 function parseAllowedUrl(input) {
     let url;
