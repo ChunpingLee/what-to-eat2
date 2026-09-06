@@ -17,6 +17,8 @@ interface SettingsData { deleting: boolean; errorMessage: string }
 interface SettingsPage {
   data: SettingsData
   setData(data: Partial<SettingsData>): void
+  getTabBar?(): { setData(data: { selected: number }): void } | undefined
+  onShow(): void
   onDeleteAccount(): Promise<void>
 }
 
@@ -37,6 +39,10 @@ const deleteAccountAction = createDeleteAccountAction({
 if (typeof Page === 'function') {
   Page<SettingsPage>({
     data: { deleting: false, errorMessage: '' },
+
+    onShow(this: SettingsPage) {
+      this.getTabBar?.()?.setData({ selected: 2 })
+    },
 
     async onDeleteAccount(this: SettingsPage) {
       if (this.data.deleting) return

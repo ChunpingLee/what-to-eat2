@@ -1,6 +1,7 @@
 <view class="branch-picker" aria-label="选择分店">
-  <button wx:for="{{displayItems}}" wx:key="poiId" class="branch {{item.disabled ? 'disabled' : ''}}" data-poi-id="{{item.poiId}}" disabled="{{item.disabled}}" bindtap="onToggle">
+  <button wx:for="{{displayItems}}" wx:key="poiId" class="branch {{item.disabled ? 'disabled' : ''}} {{item.selected ? 'selected-state' : ''}}" data-poi-id="{{item.poiId}}" disabled="{{item.disabled}}" bindtap="onToggle">
     <view class="branch-main">
+      <view class="branch-mark">{{item.selected ? '✓' : ''}}</view>
       <text class="branch-name">{{item.name}}</text>
       <text wx:if="{{item.disabled}}" class="added">已加入</text>
       <text wx:elif="{{item.selected}}" class="selected">已选择</text>

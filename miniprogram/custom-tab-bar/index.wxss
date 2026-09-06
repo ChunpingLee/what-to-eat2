@@ -1,0 +1,77 @@
+.dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 100;
+  padding: 0 28rpx calc(20rpx + env(safe-area-inset-bottom));
+  pointer-events: none;
+}
+
+.dock-inner {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-end;
+  height: 120rpx;
+  padding: 0 24rpx;
+  border-radius: 52rpx;
+  background: #FFFFFF;
+  box-shadow: 0 12rpx 40rpx rgba(61, 43, 34, 0.14);
+}
+
+.tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4rpx;
+}
+
+.tab-icon {
+  font-size: 40rpx;
+  line-height: 1;
+  transition: transform 0.2s ease;
+}
+
+.tab.on .tab-icon {
+  transform: scale(1.12);
+}
+
+.tab-text {
+  font-size: 22rpx;
+  color: #A18877;
+  line-height: 1.2;
+}
+
+.tab.on .tab-text {
+  color: #E04E1F;
+  font-weight: 600;
+}
+
+/* 中央凸起按钮 */
+.tab-center {
+  position: relative;
+}
+
+.fab {
+  position: relative;
+  top: -34rpx;
+  width: 104rpx;
+  height: 104rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 48rpx;
+  background: linear-gradient(160deg, #FF8A50, #FF5B2E);
+  box-shadow: 0 12rpx 28rpx rgba(255, 91, 46, 0.38);
+  border: 6rpx solid #FFF7EF;
+  box-sizing: content-box;
+}
+
+.tab-text.text-on {
+  margin-top: -30rpx;
+  color: #E04E1F;
+  font-weight: 600;
+}

@@ -104,10 +104,10 @@ if (typeof Page === 'function') {
     },
 
     onShareAppMessage(this: PlaceDetailPage) {
-      const poiId = this.data.place?.poiId
+      const place = this.data.place
       return {
-        title: '分享一家餐厅',
-        path: poiId ? sharePathFor(poiId) : '/pages/home/index',
+        title: place ? `想吃「${place.name}」` : '分享一家餐厅',
+        path: place ? sharePathFor(place.poiId) : '/pages/home/index',
       }
     },
   })

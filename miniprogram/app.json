@@ -9,14 +9,26 @@
   ],
   "window": {
     "navigationBarTitleText": "最想吃啥",
-    "navigationBarBackgroundColor": "#ffffff",
+    "navigationBarBackgroundColor": "#FFF7EF",
     "navigationBarTextStyle": "black",
-    "backgroundColor": "#f7f8fa"
+    "backgroundColor": "#FFF7EF"
+  },
+  "tabBar": {
+    "custom": true,
+    "color": "#A18877",
+    "selectedColor": "#E04E1F",
+    "backgroundColor": "#FFFFFF",
+    "list": [
+      { "pagePath": "pages/home/index", "text": "想吃" },
+      { "pagePath": "pages/recommend/index", "text": "帮你挑" },
+      { "pagePath": "pages/settings/index", "text": "我的" }
+    ]
   },
   "permission": {
     "scope.userLocation": {
       "desc": "用于展示附近收藏、搜索餐厅并计算路线时间"
     }
   },
-  "requiredPrivateInfos": ["getLocation", "chooseLocation"]
+  "requiredPrivateInfos": ["getLocation", "chooseLocation"],
+  "usingComponents": {}
 }

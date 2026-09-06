@@ -4,12 +4,31 @@ import type { RecommendationItem, RecommendationResult } from '../../../cloudfun
 import { FIXED_RESTAURANT_CATEGORIES } from '../../shared/restaurant-categories'
 import { addFavoriteBatch, recommendPlaces } from '../../services/cloud'
 import { chooseManualLocation, getCurrentLocation } from '../../services/location'
+import { formatDistanceLabel } from '../home/controller'
 
 type RecommendationStatus = 'idle' | 'loading' | 'ready' | 'empty' | 'locationRequired' | 'error'
-type PreferenceMode = 'category' | 'keywords' | 'random'
+type PreferenceMode = 'any' | 'category' | 'keywords' | 'random'
 
 interface SelectOption<T> { label: string; value: T; selected: boolean }
-interface DisplayItem extends RecommendationItem { poiId: string; added: boolean }
+
+interface DisplayBars {
+  /** 0-100 进度，仅由真实存在的数据推导（与打分口径一致）。 */
+  proximity?: number
+  proximityLabel?: string
+  rating?: number
+  ratingLabel?: string
+}
+
+interface DisplayItem extends RecommendationItem, DisplayBars {
+  poiId: string
+  added: boolean
+  rankIndex: number
+  scorePct: number
+  metaText: string
+  costText?: string
+  walkText?: string
+  driveText?: string
+}
 
 interface RecommendationData {
   status: RecommendationStatus
@@ -29,6 +48,8 @@ interface RecommendationData {
   sourceUpdatedAt: string
   errorMessage: string
   savingPoiId: string
+  filtersOpen: boolean
+  filterSummary: string
 }
 
 interface DatasetEvent {
@@ -42,8 +63,13 @@ interface RecommendationPage {
   /** Non-reactive input store: writing here never re-renders, so iOS same-layer inputs keep their text. */
   values?: { keywords: string; budgetMin: string; budgetMax: string; maxMinutes: string }
   setData(data: Partial<RecommendationData>): void
+  getTabBar?(): { setData(data: { selected: number }): void } | undefined
   onLoad(): void
+  onShow(): void
   onCategory(event: DatasetEvent): void
+  onAnyCategory(): void
+  onToggleFilters(): void
+  refreshFilterSummary(): void
   onKeywordFocus(): void
   onKeywordInput(event: InputEvent): void
   onRandom(): void
@@ -113,7 +139,8 @@ export function buildRecommendationInput(data: RecommendationForm): Recommendati
   return {
     ...(data.preferenceMode === 'category' ? { category: data.category } : {}),
     ...(data.preferenceMode === 'keywords' ? { keywords: data.keywords.trim() } : {}),
-    random: data.preferenceMode === 'random',
+    // 「不限」与「随便吃」都不带品类/关键词偏好：服务端按 random 口径搜索全部餐厅。
+    random: data.preferenceMode === 'random' || data.preferenceMode === 'any',
     radiusMeters: data.radiusMeters,
     travelMode: data.travelMode,
     ...(maxMinutes === undefined ? {} : { maxMinutes }),
@@ -121,8 +148,85 @@ export function buildRecommendationInput(data: RecommendationForm): Recommendati
   }
 }
 
+const TRAVEL_LABELS: Record<TravelMode, string> = {
+  walking: '步行',
+  bicycling: '骑行',
+  driving: '驾车',
+}
+
+function categoryLabel(category: string): string {
+  return FIXED_RESTAURANT_CATEGORIES.find(option => option.id === category)?.label ?? ''
+}
+
+/** 折叠筛选条的一行摘要，例如「不限 · 5公里 · 驾车 · ≤30分钟」。 */
+export function buildFilterSummary(data: RecommendationForm): string {
+  const parts: string[] = []
+  if (data.preferenceMode === 'random') parts.push('随便吃')
+  else if (data.preferenceMode === 'keywords') parts.push(data.keywords.trim() ? `“${data.keywords.trim()}”` : '关键词')
+  else if (data.preferenceMode === 'category') parts.push(categoryLabel(data.category) || '选品类')
+  else parts.push('不限品类')
+  parts.push(`${data.radiusMeters / 1_000}公里`)
+  parts.push(TRAVEL_LABELS[data.travelMode])
+  const maxMinutes = finiteOptional(data.maxMinutes)
+  if (maxMinutes !== undefined) parts.push(`≤${maxMinutes}分钟`)
+  const min = finiteOptional(data.budgetMin)
+  const max = finiteOptional(data.budgetMax)
+  if (min !== undefined || max !== undefined) {
+    parts.push(`人均${min === undefined ? '不限' : min}-${max === undefined ? '不限' : max}元`)
+  }
+  return parts.join(' · ')
+}
+
 export function buildRecommendationRequest(data: RecommendationForm, center: GeoPoint): RecommendationRequest {
   return { ...buildRecommendationInput(data), center }
+}
+
+export function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value))
+}
+
+/** 与 src/domain/recommendation 打分口径一致：有 maxMinutes 用时间，否则用距离/半径。 */
+export function toDisplayItem(
+  item: RecommendationItem,
+  rankIndex: number,
+  ctx: { maxMinutes?: number; radiusMeters: number; travelMode: TravelMode },
+): DisplayItem {
+  const maxMinutes = ctx.maxMinutes !== undefined && ctx.maxMinutes > 0 ? ctx.maxMinutes : undefined
+  const bars: DisplayBars = {}
+  if (maxMinutes !== undefined && item.travelMinutes !== undefined) {
+    bars.proximity = Math.round(clamp01(1 - item.travelMinutes / maxMinutes) * 100)
+    bars.proximityLabel = `路程 ${item.travelMinutes} 分钟`
+  } else if (item.distanceMeters <= ctx.radiusMeters) {
+    bars.proximity = Math.round(clamp01(1 - item.distanceMeters / ctx.radiusMeters) * 100)
+    bars.proximityLabel = `距离 ${formatDistanceLabel(item.distanceMeters)}`
+  } else if (item.travelMinutes !== undefined) {
+    bars.proximityLabel = `路程 ${item.travelMinutes} 分钟`
+  } else {
+    bars.proximityLabel = `距离 ${formatDistanceLabel(item.distanceMeters)}`
+  }
+  if (item.place.rating !== undefined && item.place.rating > 0) {
+    bars.rating = Math.round(clamp01(item.place.rating / 5) * 100)
+    bars.ratingLabel = `评分 ${item.place.rating}`
+  }
+  // 步行/驾车时间用 chips 单独展示；骑行（无 chip 的方式）保留在 meta 行。
+  const distanceText = formatDistanceLabel(item.distanceMeters)
+  const metaText = ctx.travelMode === 'bicycling' && item.travelMinutes !== undefined
+    ? `${distanceText} · 骑行约 ${item.travelMinutes} 分钟`
+    : distanceText
+  return {
+    ...item,
+    ...bars,
+    poiId: item.place.poiId,
+    added: false,
+    rankIndex,
+    scorePct: Math.round(item.score),
+    metaText,
+    ...(item.walkingMinutes !== undefined ? { walkText: `🚶 步行 ${item.walkingMinutes} 分钟` } : {}),
+    ...(item.drivingMinutes !== undefined ? { driveText: `🚗 驾车 ${item.drivingMinutes} 分钟` } : {}),
+    ...(item.place.averageCost !== undefined && item.place.averageCost > 0
+      ? { costText: `人均 ¥${item.place.averageCost}` }
+      : {}),
+  }
 }
 
 export function createRecommendationController(deps: {
@@ -179,22 +283,24 @@ const submitter = createRecommendationSubmitter()
 
 const initialData: RecommendationData = {
   status: 'idle',
-  preferenceMode: 'category',
+  preferenceMode: 'any',
   category: 'hotpot',
   keywords: '',
   budgetMin: '',
   budgetMax: '',
-  maxMinutes: '30',
+  maxMinutes: '',
   radiusMeters: 5_000,
-  travelMode: 'walking',
-  categoryOptions: categoryOptions('hotpot'),
+  travelMode: 'driving',
+  categoryOptions: categoryOptions('hotpot', false),
   radiusOptions: radiusOptions(5_000),
-  travelOptions: travelOptions('walking'),
+  travelOptions: travelOptions('driving'),
   items: [],
   stale: false,
   sourceUpdatedAt: '',
   errorMessage: '',
   savingPoiId: '',
+  filtersOpen: false,
+  filterSummary: '不限品类 · 5公里 · 驾车',
 }
 
 if (typeof Page === 'function') {
@@ -202,12 +308,35 @@ if (typeof Page === 'function') {
     data: initialData,
 
     onLoad(this: RecommendationPage) {
-      this.values = { keywords: '', budgetMin: '', budgetMax: '', maxMinutes: '30' }
+      this.values = { keywords: '', budgetMin: '', budgetMax: '', maxMinutes: '' }
+      // 进入即默认搜索：附近 5 公里、驾车、不限品类。
+      this.beginRecommendation(getCurrentLocation)
+    },
+
+    onShow(this: RecommendationPage) {
+      this.getTabBar?.()?.setData({ selected: 1 })
     },
 
     onCategory(this: RecommendationPage, event: DatasetEvent) {
       const category = textValue(event.currentTarget.dataset.category)
       this.setData({ preferenceMode: 'category', category, categoryOptions: categoryOptions(category) })
+      this.refreshFilterSummary()
+    },
+
+    onAnyCategory(this: RecommendationPage) {
+      if (this.data.preferenceMode !== 'any') {
+        this.setData({ preferenceMode: 'any', categoryOptions: categoryOptions(this.data.category, false) })
+        this.refreshFilterSummary()
+      }
+    },
+
+    onToggleFilters(this: RecommendationPage) {
+      this.refreshFilterSummary()
+      this.setData({ filtersOpen: !this.data.filtersOpen })
+    },
+
+    refreshFilterSummary(this: RecommendationPage) {
+      this.setData({ filterSummary: buildFilterSummary({ ...this.data, ...this.values! }) })
     },
 
     onKeywordFocus(this: RecommendationPage) {
@@ -223,6 +352,7 @@ if (typeof Page === 'function') {
 
     onRandom(this: RecommendationPage) {
       this.setData({ preferenceMode: 'random', categoryOptions: categoryOptions(this.data.category, false) })
+      this.refreshFilterSummary()
     },
 
     onBudgetMinInput(this: RecommendationPage, event: InputEvent) {
@@ -241,6 +371,7 @@ if (typeof Page === 'function') {
       const radiusMeters = Number(event.currentTarget.dataset.radius)
       if (radiusValues.includes(radiusMeters)) {
         this.setData({ radiusMeters, radiusOptions: radiusOptions(radiusMeters) })
+        this.refreshFilterSummary()
       }
     },
 
@@ -248,6 +379,7 @@ if (typeof Page === 'function') {
       const value = textValue(event.currentTarget.dataset.mode)
       if (value === 'walking' || value === 'bicycling' || value === 'driving') {
         this.setData({ travelMode: value, travelOptions: travelOptions(value) })
+        this.refreshFilterSummary()
       }
     },
 
@@ -263,10 +395,11 @@ if (typeof Page === 'function') {
       if (this.data.status === 'loading') return
       const intent = controller.beginIntent()
       const input = buildRecommendationInput({ ...this.data, ...this.values! })
-      if (input.random === false && !input.category && !input.keywords) {
+      if (this.data.preferenceMode === 'keywords' && !input.keywords) {
         this.setData({ status: 'error', errorMessage: '请输入想吃的关键词' })
         return
       }
+      this.refreshFilterSummary()
       this.setData({ status: 'loading', items: [], stale: false, errorMessage: '' })
       void submitter.run(() => this.runRecommendation(intent, input, locate))
     },
@@ -285,7 +418,12 @@ if (typeof Page === 'function') {
           return
         }
         const { result } = outcome
-        const items = result.items.map(item => ({ ...item, poiId: item.place.poiId, added: false }))
+        const ctx = {
+          maxMinutes: finiteOptional(this.values!.maxMinutes),
+          radiusMeters: this.data.radiusMeters,
+          travelMode: this.data.travelMode,
+        }
+        const items = result.items.map((item, index) => toDisplayItem(item, index, ctx))
         this.setData({
           status: items.length ? 'ready' : 'empty',
           items,

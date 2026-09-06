@@ -31,6 +31,7 @@ function cacheKeyFor(query) {
         longitude: query.center.longitude,
         city: normalizeText(query.city),
         radiusMeters: query.radiusMeters,
+        types: query.types ? normalizeText(query.types) : '',
     });
     return (0, node_crypto_1.createHash)('sha256').update(normalized).digest('hex');
 }
@@ -44,7 +45,9 @@ function createMemorySearchCache() {
 }
 function validate(query) {
     if (!query || typeof query !== 'object'
-        || typeof query.keywords !== 'string' || !query.keywords.trim()
+        || typeof query.keywords !== 'string'
+        || (query.types !== undefined && (typeof query.types !== 'string' || !query.types.trim()))
+        || (!query.keywords.trim() && !(typeof query.types === 'string' && query.types.trim()))
         || typeof query.city !== 'string'
         || !query.center || typeof query.center !== 'object'
         || !Number.isFinite(query.center.latitude) || query.center.latitude < -90 || query.center.latitude > 90

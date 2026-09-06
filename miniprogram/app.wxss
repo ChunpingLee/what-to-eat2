@@ -1,0 +1,153 @@
+/**
+ * 设计令牌 — 方向 A「暖食手账」
+ * 暖白纸感底色 + 主色落日橙 + 卡片圆角阴影
+ */
+page {
+  --bg: #FFF7EF;
+  --card: #FFFFFF;
+  --primary: #FF6A3D;
+  --primary-deep: #FF5B2E;
+  --primary-grad: linear-gradient(90deg, #FF8A50, #FF5B2E);
+  --title: #3D2B22;
+  --sub: #A18877;
+  --sub2: #B3A396;
+  --tag-bg: #FFF1E4;
+  --tag-text: #C0552F;
+  --tag-soft: #FAF3EA;
+  --line: #F1E7DC;
+  --seg-bg: #F4E7DA;
+  --danger: #C0392B;
+  --shadow: 0 10rpx 30rpx rgba(224, 108, 47, 0.10);
+  --shadow-lift: 0 16rpx 40rpx rgba(224, 108, 47, 0.18);
+
+  background: var(--bg);
+  color: var(--title);
+  font-size: 28rpx;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+}
+
+/* ---------- 布局骨架 ---------- */
+.page {
+  min-height: 100vh;
+  padding: 32rpx 32rpx 240rpx; /* 底部留出悬浮 dock */
+  box-sizing: border-box;
+}
+
+/* ---------- 卡片 ---------- */
+.card {
+  background: var(--card);
+  border-radius: 24rpx;
+  padding: 28rpx;
+  box-shadow: var(--shadow);
+}
+
+/* ---------- 按钮 ---------- */
+button {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+  line-height: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+button::after {
+  border: none;
+}
+
+.btn-primary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 96rpx;
+  border-radius: 999rpx;
+  background: var(--primary-grad);
+  color: #FFFFFF;
+  font-size: 32rpx;
+  font-weight: 600;
+  box-shadow: var(--shadow-lift);
+}
+.btn-primary[disabled] {
+  opacity: 0.6;
+  color: #FFFFFF;
+}
+
+.btn-ghost {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 88rpx;
+  border-radius: 999rpx;
+  background: var(--card);
+  color: var(--primary);
+  font-size: 30rpx;
+  font-weight: 600;
+  border: 2rpx solid var(--line);
+}
+.btn-ghost[disabled] {
+  opacity: 0.6;
+}
+
+/* ---------- 标签 chip ---------- */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14rpx 30rpx;
+  border-radius: 999rpx;
+  background: var(--card);
+  color: var(--sub);
+  font-size: 26rpx;
+  border: 2rpx solid var(--line);
+}
+.chip.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #FFFFFF;
+  font-weight: 600;
+  box-shadow: 0 6rpx 16rpx rgba(255, 106, 61, 0.32);
+}
+
+/* ---------- 输入框 ---------- */
+.input {
+  height: 88rpx;
+  padding: 0 28rpx;
+  border-radius: 999rpx;
+  background: var(--card);
+  border: 2rpx solid var(--line);
+  font-size: 28rpx;
+  color: var(--title);
+  box-sizing: border-box;
+}
+
+/* ---------- 状态文本 ---------- */
+.error {
+  margin-top: 20rpx;
+  padding: 20rpx 24rpx;
+  border-radius: 20rpx;
+  background: #FDEDEA;
+  color: var(--danger);
+  font-size: 26rpx;
+  line-height: 1.5;
+}
+
+.notice {
+  margin-top: 20rpx;
+  padding: 20rpx 24rpx;
+  border-radius: 20rpx;
+  background: var(--tag-bg);
+  color: var(--tag-text);
+  font-size: 26rpx;
+  line-height: 1.5;
+}
+
+.empty {
+  margin-top: 20rpx;
+  padding: 48rpx 32rpx;
+  border-radius: 24rpx;
+  background: var(--tag-soft);
+  color: var(--sub);
+  font-size: 26rpx;
+  text-align: center;
+  line-height: 1.6;
+}

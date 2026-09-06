@@ -4,7 +4,8 @@ import { chooseManualLocation, getCurrentLocation } from '../../services/locatio
 import { createHomeController, type HomeFavorite } from './controller'
 
 const controller = createHomeController({ listFavorites })
-const radiusOptions = [1, 3, 5, 10] as const
+/** 0 表示「全部」：不按距离过滤，仅按距离升序展示全部收藏。 */
+const radiusOptions = [0, 1, 3, 5, 10] as const
 
 type DisplayStatus = 'loading' | 'ready' | 'empty' | 'locationRequired' | 'error'
 
@@ -22,21 +23,28 @@ interface RadiusEvent {
   currentTarget: { dataset: { radius: number } }
 }
 
+interface OpenLocationEvent {
+  currentTarget: { dataset: Record<string, unknown> }
+}
+
 interface HomePage {
   data: HomeData
   setData(data: Partial<HomeData>): void
+  getTabBar?(): { setData(data: { selected: number }): void } | undefined
   onLoad(): void
+  onShow(): void
   loadHome(center: GeoPoint, radiusMeters: number): Promise<void>
   requestCurrentLocation(): Promise<void>
   onRadiusChange(event: RadiusEvent): void
   onManualLocation(): void
   onRetry(): void
+  onOpenLocation(event: OpenLocationEvent): void
 }
 
 Page<HomePage>({
   data: {
     status: 'loading',
-    radiusMeters: 5_000,
+    radiusMeters: 0,
     radiusOptions,
     items: [],
     showRecommend: true,
@@ -45,6 +53,10 @@ Page<HomePage>({
 
   onLoad(this: HomePage) {
     void this.requestCurrentLocation()
+  },
+
+  onShow(this: HomePage) {
+    this.getTabBar?.()?.setData({ selected: 0 })
   },
 
   async loadHome(this: HomePage, center: GeoPoint, radiusMeters: number) {
@@ -83,6 +95,19 @@ Page<HomePage>({
   onRetry(this: HomePage) {
     if (this.data.center) void this.loadHome(this.data.center, this.data.radiusMeters)
     else void this.requestCurrentLocation()
+  },
+
+  onOpenLocation(this: HomePage, event: OpenLocationEvent) {
+    const latitude = Number(event.currentTarget.dataset.latitude)
+    const longitude = Number(event.currentTarget.dataset.longitude)
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return
+    wx.openLocation({
+      latitude,
+      longitude,
+      name: typeof event.currentTarget.dataset.name === 'string' ? event.currentTarget.dataset.name : '',
+      address: typeof event.currentTarget.dataset.address === 'string' ? event.currentTarget.dataset.address : '',
+      scale: 16,
+    })
   },
 
 })

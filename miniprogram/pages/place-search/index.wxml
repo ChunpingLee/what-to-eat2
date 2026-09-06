@@ -1,15 +1,32 @@
 <view class="page">
-  <view class="title">加入想吃</view>
-  <view class="hint">搜索同名餐厅后，可一次加入多个分店。</view>
-  <input class="input" placeholder="餐厅名称，例如：海底捞" value="{{keywords}}" bindinput="onKeywordInput" />
-  <input class="input" placeholder="城市，例如：上海" value="{{city}}" bindinput="onCityInput" />
-  <button class="primary" loading="{{status === 'searching'}}" bindtap="onSearch">搜索附近分店</button>
-  <button class="secondary" bindtap="onManualLocation">手动选择搜索地点</button>
+  <view class="header">
+    <view class="headline">搜索餐厅</view>
+    <view class="subtitle">搜同名餐厅，一次加入多个分店。</view>
+  </view>
+
+  <view class="card form-card">
+    <view class="field-label">餐厅名称</view>
+    <input class="input" placeholder="例如：海底捞" value="{{keywords}}" bindinput="onKeywordInput" />
+    <view class="field-label">城市</view>
+    <input class="input" placeholder="例如：上海" value="{{city}}" bindinput="onCityInput" />
+    <button class="btn-primary cta" loading="{{status === 'searching'}}" bindtap="onSearch">🔍 搜索附近分店</button>
+    <button class="btn-ghost cta-ghost" bindtap="onManualLocation">手动选择搜索地点</button>
+  </view>
 
   <view wx:if="{{status === 'error'}}" class="error">{{errorMessage}}</view>
-  <view wx:if="{{status === 'empty'}}" class="hint">没有找到附近分店。</view>
-  <view wx:if="{{stale}}" class="hint">正在显示稍早的搜索结果。</view>
+  <view wx:if="{{status === 'empty'}}" class="empty">
+    <view class="empty-emoji">🔎</view>
+    <view class="empty-title">没有找到附近分店</view>
+    <view class="empty-sub">换个名字或城市试试。</view>
+  </view>
+  <view wx:if="{{stale}}" class="notice">正在显示稍早的搜索结果。</view>
 
-  <branch-picker wx:if="{{branches.length}}" items="{{branches}}" selected-poi-ids="{{selectedPoiIds}}" bind:change="onSelectionChange" />
-  <button wx:if="{{branches.length}}" class="primary" disabled="{{selectedPoiIds.length === 0 || submitting}}" loading="{{submitting}}" bindtap="onAddSelected">加入已选分店（{{selectedPoiIds.length}}）</button>
+  <block wx:if="{{branches.length}}">
+    <view class="section-head">
+      <text class="section-title">选择分店</text>
+      <text class="section-note">已选 {{selectedPoiIds.length}} 家</text>
+    </view>
+    <branch-picker items="{{branches}}" selected-poi-ids="{{selectedPoiIds}}" bind:change="onSelectionChange" />
+    <button class="btn-primary cta" disabled="{{selectedPoiIds.length === 0 || submitting}}" loading="{{submitting}}" bindtap="onAddSelected">加入已选分店（{{selectedPoiIds.length}}）</button>
+  </block>
 </view>

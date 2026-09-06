@@ -77,12 +77,20 @@ function matchesBudget(place, budget) {
     return (budget.min === undefined || place.averageCost >= budget.min)
         && (budget.max === undefined || place.averageCost <= budget.max);
 }
-function searchKeywords(request) {
+/** 高德 POI 分类：050000 餐饮服务大类。 */
+const RESTAURANT_TYPECODE = '050000';
+function searchFilter(request) {
+    // 不限/随便吃：keywords 是对门店名的模糊匹配而非分类过滤，会混入非餐厅 POI；
+    // 改用分类码检索周边全部餐饮门店。
     if (request.random)
-        return '餐饮服务';
+        return { keywords: '', types: RESTAURANT_TYPECODE };
     if (text(request.keywords))
-        return text(request.keywords);
-    return (0, restaurant_categories_1.findRestaurantCategory)(request.category)?.searchKeyword ?? text(request.category);
+        return { keywords: text(request.keywords) };
+    const category = (0, restaurant_categories_1.findRestaurantCategory)(request.category);
+    return {
+        keywords: category?.searchKeyword ?? text(request.category),
+        ...(category?.typecode ? { types: category.typecode } : {}),
+    };
 }
 function withRouteTimes(candidates, times, maxMinutes) {
     return candidates.flatMap((candidate, index) => {
@@ -95,11 +103,28 @@ function withRouteTimes(candidates, times, maxMinutes) {
             }];
     });
 }
+/** 展示用的分模式时间：单个模式整体失败只丢该模式的展示，不影响结果本身。 */
+async function collectDisplayTimes(routeClient, center, destinations, modes) {
+    const entries = await Promise.all(modes.map(async (mode) => {
+        try {
+            return [mode, await routeClient.times(center, destinations, mode)];
+        }
+        catch {
+            return undefined;
+        }
+    }));
+    const times = {};
+    for (const entry of entries) {
+        if (entry)
+            times[entry[0]] = entry[1];
+    }
+    return times;
+}
 function createRecommendHandler(deps) {
     return async (request) => {
         validate(request);
         const searchResult = await deps.searchClient.search({
-            keywords: searchKeywords(request),
+            ...searchFilter(request),
             center: request.center,
             city: '',
             radiusMeters: request.radiusMeters,
@@ -115,18 +140,43 @@ function createRecommendHandler(deps) {
             distanceMeters: item.distanceMeters,
         }));
         let routed = routeCandidates;
+        let selectedTimes;
         if (routeCandidates.length > 0) {
             try {
-                const times = await deps.routeClient.times(request.center, routeCandidates.map(candidate => candidate.place.location), request.travelMode);
-                routed = withRouteTimes(routeCandidates, times, request.maxMinutes);
+                selectedTimes = await deps.routeClient.times(request.center, routeCandidates.map(candidate => candidate.place.location), request.travelMode);
+                routed = withRouteTimes(routeCandidates, selectedTimes, request.maxMinutes);
             }
             catch {
+                // 路线服务整体不可用：按距离回落，不再为展示补算（避免对故障中的服务加倍请求）。
                 routed = routeCandidates;
             }
         }
-        const items = (0, recommendation_1.rankRecommendations)(routed, request).slice(0, 10).map(item => ({
+        const top = (0, recommendation_1.rankRecommendations)(routed, request).slice(0, 10);
+        // 步行/驾车展示时间：选定方式已算过的直接复用，其余只为最终 10 家补算，控制路线 API 调用量。
+        const selectedIsChipMode = selectedTimes !== undefined
+            && (request.travelMode === 'walking' || request.travelMode === 'driving');
+        const displayTimes = top.map(item => selectedIsChipMode && item.travelMinutes !== undefined
+            ? request.travelMode === 'walking'
+                ? { walkingMinutes: item.travelMinutes }
+                : { drivingMinutes: item.travelMinutes }
+            : {});
+        const missingModes = selectedTimes === undefined ? []
+            : ['walking', 'driving'].filter(mode => !(selectedIsChipMode && request.travelMode === mode));
+        if (missingModes.length > 0 && top.length > 0) {
+            const times = await collectDisplayTimes(deps.routeClient, request.center, top.map(item => item.place.location), missingModes);
+            top.forEach((_item, index) => {
+                const walkingMinutes = times.walking?.[index];
+                const drivingMinutes = times.driving?.[index];
+                if (walkingMinutes !== undefined)
+                    displayTimes[index] = { ...displayTimes[index], walkingMinutes };
+                if (drivingMinutes !== undefined)
+                    displayTimes[index] = { ...displayTimes[index], drivingMinutes };
+            });
+        }
+        const items = top.map((item, index) => ({
             ...item,
             travelTimeUnavailable: item.travelMinutes === undefined,
+            ...displayTimes[index],
         }));
         return {
             items,
