@@ -14,6 +14,7 @@ import { createAmapRouteHttp, createAmapRoutesClient } from '../../cloudfunction
 import { main as placeRoutesMain } from '../../cloudfunctions/place-routes/index'
 import { createAmapClient, createAmapHttp } from '../../cloudfunctions/place-search/amap-client'
 import {
+  buildFilterSummary,
   buildRecommendationInput,
   createRecommendationController,
   createRecommendationSubmitter,
@@ -56,11 +57,17 @@ describe('recommend cloud function', () => {
 
     await createRecommendHandler(deps)(request)
 
-    expect(deps.routeClient.times).toHaveBeenCalledOnce()
-    expect(deps.routeClient.times).toHaveBeenCalledWith(
+    // 第一次：选定方式（20 家，用于过滤与排序）；第二次：展示用的另一方式（仅最终 10 家）。
+    expect(deps.routeClient.times).toHaveBeenCalledTimes(2)
+    expect(deps.routeClient.times).toHaveBeenNthCalledWith(1,
       center,
       Array.from({ length: 20 }, (_, index) => place(index + 1).location),
       'walking',
+    )
+    expect(deps.routeClient.times).toHaveBeenNthCalledWith(2,
+      center,
+      Array.from({ length: 10 }, (_, index) => place(index + 1).location),
+      'driving',
     )
   })
 
@@ -111,13 +118,41 @@ describe('recommend cloud function', () => {
 
     expect(result.items).toHaveLength(2)
     expect(result.items.find(item => item.place.poiId === 'p01')).toMatchObject({
-      travelMinutes: 12, travelTimeUnavailable: false,
+      travelMinutes: 12, walkingMinutes: 12, travelTimeUnavailable: false,
     })
     expect(result.items.find(item => item.place.poiId === 'p02')).toMatchObject({
       travelTimeUnavailable: true,
     })
     expect(result.items.find(item => item.place.poiId === 'p02')).not.toHaveProperty('travelMinutes')
+    expect(result.items.find(item => item.place.poiId === 'p02')).not.toHaveProperty('walkingMinutes')
     expect(result.items.map(item => item.place.poiId)).not.toContain('p03')
+  })
+
+  it('reuses the selected mode time and fetches the other mode for the final ten', async () => {
+    const deps = dependencies([place(1), place(2), place(3)])
+    vi.mocked(deps.routeClient.times).mockImplementation(async (_origin, destinations, mode) =>
+      destinations.map(() => (mode === 'driving' ? 8 : 24)))
+
+    const result = await createRecommendHandler(deps)({ ...request, travelMode: 'driving' })
+
+    expect(vi.mocked(deps.routeClient.times).mock.calls.map(call => call[2])).toEqual(['driving', 'walking'])
+    expect(result.items).toHaveLength(3)
+    for (const item of result.items) {
+      expect(item).toMatchObject({ travelMinutes: 8, drivingMinutes: 8, walkingMinutes: 24 })
+    }
+  })
+
+  it('fetches both walking and driving for display when the selected mode is bicycling', async () => {
+    const deps = dependencies([place(1)])
+    vi.mocked(deps.routeClient.times).mockImplementation(async (_origin, _destinations, mode) =>
+      [mode === 'driving' ? 8 : 24])
+
+    const result = await createRecommendHandler(deps)({
+      ...request, travelMode: 'bicycling', maxMinutes: undefined,
+    })
+
+    expect(vi.mocked(deps.routeClient.times).mock.calls.map(call => call[2])).toEqual(['bicycling', 'walking', 'driving'])
+    expect(result.items[0]).toMatchObject({ travelMinutes: 24, walkingMinutes: 24, drivingMinutes: 8 })
   })
 
   it('keeps distance results and never claims the time limit passed when the route request fails', async () => {
@@ -129,6 +164,10 @@ describe('recommend cloud function', () => {
     expect(result.items).toHaveLength(2)
     expect(result.items[0]).toMatchObject({ travelTimeUnavailable: true })
     expect(result.items[0]).not.toHaveProperty('travelMinutes')
+    // 路线服务整体失败后不再为展示补算，避免对故障中的服务加倍请求。
+    expect(deps.routeClient.times).toHaveBeenCalledOnce()
+    expect(result.items[0]).not.toHaveProperty('walkingMinutes')
+    expect(result.items[0]).not.toHaveProperty('drivingMinutes')
   })
 
   it('defers route client construction so missing route configuration uses the distance fallback', async () => {
@@ -166,7 +205,7 @@ describe('recommend cloud function', () => {
     const second = await handler(randomRequest)
 
     expect(second.items.map(item => item.place.poiId)).toEqual(first.items.map(item => item.place.poiId))
-    expect(deps.searchClient.search).toHaveBeenCalledWith(expect.objectContaining({ keywords: '餐饮服务' }))
+    expect(deps.searchClient.search).toHaveBeenCalledWith(expect.objectContaining({ keywords: '', types: '050000' }))
   })
 
   it('rejects requests that have no preference mode or use invalid filters before external calls', async () => {
@@ -273,6 +312,17 @@ describe('recommendation place search adapter', () => {
     expect(params.get('page_size')).toBe('25')
   })
 
+  it('searches no-preference queries by restaurant typecode instead of fuzzy keywords', async () => {
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ status: '1', pois: [] }) })
+    const client = createAmapClient({ key: 'server-only', http: createAmapHttp(fetcher as never) })
+
+    await client.search({ keywords: '', types: '050000', center, city: '', radiusMeters: 5_000 })
+
+    const params = new URL(fetcher.mock.calls[0][0] as string).searchParams
+    expect(params.has('keywords')).toBe(false)
+    expect(params.get('types')).toBe('050000')
+  })
+
   it('ships coordinate-only search and twenty-five candidates in the deployable place-search build', async () => {
     const compiledPath = resolve(process.cwd(), 'cloudfunctions/place-search/dist/cloudfunctions/place-search/amap-client.js')
     const compiled = require(compiledPath) as typeof import('../../cloudfunctions/place-search/amap-client')
@@ -297,17 +347,20 @@ describe('recommendation page contract', () => {
     const script = read('miniprogram/pages/recommend/index.ts')
     const cloud = read('miniprogram/services/cloud.ts')
 
-    expect(page).toContain('固定品类')
-    expect(page).toContain('任意关键词')
-    expect(page).toContain('随便吃')
+    expect(page).toContain('今天想吃什么')
+    expect(page).toContain('或输入关键词')
+    expect(page).toContain('随便')
     expect(page).toContain('预算')
     expect(script).toContain('[1_000, 3_000, 5_000, 10_000]')
     expect(script).toContain('`${value / 1_000} 公里`')
     expect(script).toContain("{ label: '步行', value: 'walking' }")
     expect(script).toContain("{ label: '骑行', value: 'bicycling' }")
     expect(script).toContain("{ label: '驾车', value: 'driving' }")
-    expect(page).toContain('最长时间')
+    expect(page).toContain('最长路程')
     expect(page).toContain('出行时间未计算')
+    expect(page).toContain('travel-chip')
+    expect(script).toContain('walkingMinutes')
+    expect(script).toContain('drivingMinutes')
     expect(page).toContain('wx:for="{{item.reasons}}"')
     expect(page).toContain('bindtap="onAddFavorite"')
     expect(page).toContain('bindtap="onOpenLocation"')
@@ -388,6 +441,28 @@ describe('recommendation page controller', () => {
       category: '火锅', random: false, budget: { min: undefined, max: 120 },
       maxMinutes: 30, radiusMeters: 5_000, travelMode: 'walking',
     })
+  })
+
+  it('maps the no-preference default to an all-restaurants request', () => {
+    const input = buildRecommendationInput({
+      preferenceMode: 'any', category: 'hotpot', keywords: '', budgetMin: '', budgetMax: '',
+      maxMinutes: '', radiusMeters: 5_000, travelMode: 'driving',
+    })
+
+    expect(input).toEqual({ random: true, radiusMeters: 5_000, travelMode: 'driving' })
+  })
+
+  it('summarizes active filters for the collapsed filter bar', () => {
+    const defaults = {
+      preferenceMode: 'any' as const, category: 'hotpot', keywords: '', budgetMin: '', budgetMax: '',
+      maxMinutes: '', radiusMeters: 5_000, travelMode: 'driving' as const,
+    }
+    expect(buildFilterSummary(defaults)).toBe('不限品类 · 5公里 · 驾车')
+    expect(buildFilterSummary({ ...defaults, preferenceMode: 'category', maxMinutes: '30' })).toBe('火锅 · 5公里 · 驾车 · ≤30分钟')
+    expect(buildFilterSummary({ ...defaults, preferenceMode: 'keywords', keywords: ' 潮汕牛肉火锅 ', budgetMin: '50', budgetMax: '100' }))
+      .toBe('“潮汕牛肉火锅” · 5公里 · 驾车 · 人均50-100元')
+    expect(buildFilterSummary({ ...defaults, preferenceMode: 'random', radiusMeters: 10_000, travelMode: 'walking' as const }))
+      .toBe('随便吃 · 10公里 · 步行')
   })
 
   it('allows only one cloud invocation while a submit is pending', async () => {

@@ -30,6 +30,7 @@ declare const wx: {
     confirmColor?: string
   }): Promise<{ confirm: boolean; cancel: boolean }>
   reLaunch(options: { url: string }): void
+  switchTab(options: { url: string }): void
   openLocation(options: {
     latitude: number
     longitude: number

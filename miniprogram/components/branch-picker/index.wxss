@@ -1,7 +1,101 @@
-.branch { width: 100%; margin: 16rpx 0; padding: 24rpx; text-align: left; background: #fff; border-radius: 12rpx; }
-.branch-main { display: flex; justify-content: space-between; }
-.branch-name { font-weight: 600; }
-.branch-address, .branch-area, .branch-distance { display: block; margin-top: 8rpx; color: #666; font-size: 26rpx; }
-.added, .selected { color: #07c160; font-size: 26rpx; }
-.disabled { color: #888; background: #f4f4f4; }
-.branch-failed { margin-top: 8rpx; color: #d93025; font-size: 26rpx; }
+.branch-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+}
+
+.branch {
+  position: relative;
+  width: 100%;
+  padding: 26rpx 28rpx;
+  text-align: left;
+  background: var(--card, #FFFFFF);
+  border-radius: 24rpx;
+  border: 2rpx solid var(--line, #F1E7DC);
+  box-shadow: 0 8rpx 22rpx rgba(224, 108, 47, 0.08);
+  box-sizing: border-box;
+  transition: border-color 0.15s ease;
+}
+
+.branch-name {
+  font-weight: 700;
+  font-size: 30rpx;
+  color: var(--title, #3D2B22);
+}
+
+.branch-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.branch-mark {
+  flex-shrink: 0;
+  width: 40rpx;
+  height: 40rpx;
+  border-radius: 50%;
+  border: 2rpx solid var(--line, #F1E7DC);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24rpx;
+  color: #FFFFFF;
+}
+
+.branch.selected-state .branch-mark {
+  background: var(--primary, #FF6A3D);
+  border-color: var(--primary, #FF6A3D);
+}
+
+.added,
+.selected {
+  flex-shrink: 0;
+  padding: 6rpx 18rpx;
+  border-radius: 999rpx;
+  font-size: 22rpx;
+  font-weight: 600;
+}
+
+.added {
+  background: var(--tag-soft, #FAF3EA);
+  color: var(--sub2, #B3A396);
+}
+
+.selected {
+  background: var(--tag-bg, #FFF1E4);
+  color: var(--tag-text, #C0552F);
+}
+
+.branch-address,
+.branch-area {
+  display: block;
+  margin-top: 8rpx;
+  color: var(--sub, #A18877);
+  font-size: 24rpx;
+  line-height: 1.5;
+}
+
+.branch-distance {
+  display: inline-block;
+  margin-top: 12rpx;
+  padding: 6rpx 18rpx;
+  border-radius: 999rpx;
+  background: var(--tag-soft, #FAF3EA);
+  color: var(--tag-text, #C0552F);
+  font-size: 22rpx;
+  font-weight: 600;
+}
+
+.disabled {
+  opacity: 0.55;
+  background: var(--tag-soft, #FAF3EA);
+  box-shadow: none;
+}
+
+.branch-failed {
+  margin-top: 12rpx;
+  color: var(--danger, #C0392B);
+  font-size: 22rpx;
+  line-height: 1.5;
+}

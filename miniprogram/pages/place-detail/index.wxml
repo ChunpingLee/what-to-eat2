@@ -1,15 +1,51 @@
 <view class="page">
-  <view wx:if="{{status === 'loading'}}" class="hint">正在重新查询公开餐厅信息…</view>
+  <view wx:if="{{status === 'loading'}}" class="loading-row">
+    <view class="loading-dot"></view>
+    <text>正在查询公开餐厅信息…</text>
+  </view>
+
   <view wx:if="{{status === 'error'}}" class="error">无法打开分享：{{errorMessage}}</view>
-  <view wx:if="{{status === 'ready' && place}}" class="card">
-    <view class="name">{{place.name}}</view>
-    <view class="address">{{place.address || ''}}</view>
-    <view wx:if="{{categoriesText}}" class="meta">{{categoriesText}}</view>
-    <button class="primary" bindtap="onOpenLocation">打开地图导航</button>
-    <button class="primary" loading="{{adding}}" disabled="{{adding || favoriteAdded}}" bindtap="onAddFavorite">
-      {{favoriteAdded ? '已加入我的收藏' : '加入我的收藏'}}
-    </button>
-    <button class="secondary" open-type="share">分享这家店</button>
+
+  <view wx:if="{{status === 'ready' && place}}" class="detail">
+    <swiper wx:if="{{place.photos.length}}" class="photos" indicator-dots indicator-color="rgba(255,255,255,0.4)" indicator-active-color="#FFFFFF" circular>
+      <swiper-item wx:for="{{place.photos}}" wx:key="*this">
+        <image class="photo" src="{{item}}" mode="aspectFill" />
+      </swiper-item>
+    </swiper>
+
+    <view class="hero">
+      <view class="hero-tag">餐厅详情</view>
+      <view class="hero-name">{{place.name}}</view>
+      <view wx:if="{{place.address}}" class="hero-address">{{place.address}}</view>
+      <view wx:if="{{place.businessArea}}" class="hero-area">{{place.businessArea}}</view>
+    </view>
+
+    <view wx:if="{{place.rating || place.averageCost || place.businessStatus}}" class="facts">
+      <view wx:if="{{place.rating}}" class="fact fact-star">
+        <text class="fact-num">{{place.rating}}</text>
+        <text class="fact-unit">评分</text>
+      </view>
+      <view wx:if="{{place.averageCost}}" class="fact">
+        <text class="fact-num">¥{{place.averageCost}}</text>
+        <text class="fact-unit">人均</text>
+      </view>
+      <view wx:if="{{place.businessStatus}}" class="fact fact-status">
+        <text class="fact-num">{{place.businessStatus}}</text>
+      </view>
+    </view>
+
+    <view wx:if="{{categoriesText}}" class="cats">
+      <text class="cat" wx:for="{{place.categories}}" wx:key="*this">{{item}}</text>
+    </view>
+
+    <view class="actions">
+      <button class="btn-primary" bindtap="onOpenLocation">🗺 打开地图导航</button>
+      <button class="btn-ghost" loading="{{adding}}" disabled="{{adding || favoriteAdded}}" bindtap="onAddFavorite">
+        {{favoriteAdded ? '✓ 已加入想吃' : '🤍 加入想吃'}}
+      </button>
+      <button class="share-btn" open-type="share">分享这家店给朋友</button>
+    </view>
+
     <view wx:if="{{errorMessage}}" class="error">{{errorMessage}}</view>
   </view>
 </view>

@@ -77,11 +77,14 @@ function createAmapHttp(fetcher = (0, https_json_1.createHttpsJsonFetch)(), diag
         try {
             const params = new URLSearchParams({
                 key: query.key,
-                keywords: query.keywords,
                 location: query.location,
                 radius: String(query.radius),
                 show_fields: query.showFields,
             });
+            if (query.keywords.trim())
+                params.set('keywords', query.keywords);
+            if (query.types?.trim())
+                params.set('types', query.types.trim());
             if (query.region) {
                 params.set('region', query.region);
                 params.set('city_limit', String(query.cityLimit));
@@ -129,6 +132,7 @@ function createAmapClient({ key = process.env.AMAP_WEB_KEY, http = createAmapHtt
                 cityLimit: Boolean(query.city.trim()),
                 showFields: 'business,photos',
                 pageSize: 25,
+                ...(query.types?.trim() ? { types: query.types.trim() } : {}),
             });
             if (response.status !== '1' || !Array.isArray(response.pois)) {
                 diagnostic({

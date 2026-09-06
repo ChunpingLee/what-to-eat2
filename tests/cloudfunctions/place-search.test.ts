@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { AmapTimeoutError, createAmapClient, createAmapHttp } from '../../cloudfunctions/place-search/amap-client'
-import { createCloudBaseSearchCache, createPlaceSearchService, createMemorySearchCache } from '../../cloudfunctions/place-search/cache'
+import { cacheKeyFor, createCloudBaseSearchCache, createPlaceSearchService, createMemorySearchCache } from '../../cloudfunctions/place-search/cache'
 import { main as placeSearchMain } from '../../cloudfunctions/place-search/index'
 import {
   createCloudBasePublicPlaceStore,
@@ -161,6 +161,21 @@ describe('place search cloud function', () => {
     await expect(service.searchPlaces({} as typeof query)).rejects.toMatchObject({
       name: 'SafeError', code: 'INVALID_SEARCH_QUERY', message: 'Invalid place search query',
     })
+  })
+
+  it('accepts keyword-free typecode searches and caches them apart from keyword searches', async () => {
+    const client = { search: vi.fn().mockResolvedValue([]) }
+    const service = createPlaceSearchService({ client, cache: createMemorySearchCache() })
+    const typeQuery = { ...query, keywords: '', types: '050000', city: '' }
+
+    await expect(service.searchPlaces(typeQuery)).resolves.toMatchObject({ items: [], stale: false })
+    expect(client.search).toHaveBeenCalledWith(expect.objectContaining({ types: '050000' }))
+
+    const keywordQuery = { ...query, keywords: '餐饮服务', city: '' }
+    expect(cacheKeyFor(typeQuery)).not.toBe(cacheKeyFor(keywordQuery))
+
+    const rejecting = createPlaceSearchService({ client, cache: createMemorySearchCache() })
+    await expect(rejecting.searchPlaces({ ...typeQuery, types: ' ' })).rejects.toMatchObject({ code: 'INVALID_SEARCH_QUERY' })
   })
 
   it('marks a cache read failure with a safe diagnostic stage', async () => {

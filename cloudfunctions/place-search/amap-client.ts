@@ -8,6 +8,8 @@ export interface PlaceSearchQuery {
   center: GeoPoint
   city: string
   radiusMeters: number
+  /** 高德 POI 分类码（如 050000 餐饮服务）。提供后按分类检索，keywords 可为空。 */
+  types?: string
 }
 
 export interface AmapResponse { status?: unknown; pois?: unknown; info?: unknown; infocode?: unknown }
@@ -20,6 +22,7 @@ export interface AmapHttpQuery {
   cityLimit: boolean
   showFields: string
   pageSize?: number
+  types?: string
 }
 export type AmapHttp = (query: AmapHttpQuery) => Promise<AmapResponse>
 
@@ -108,11 +111,12 @@ export function createAmapHttp(
     try {
       const params = new URLSearchParams({
         key: query.key,
-        keywords: query.keywords,
         location: query.location,
         radius: String(query.radius),
         show_fields: query.showFields,
       })
+      if (query.keywords.trim()) params.set('keywords', query.keywords)
+      if (query.types?.trim()) params.set('types', query.types.trim())
       if (query.region) {
         params.set('region', query.region)
         params.set('city_limit', String(query.cityLimit))
@@ -158,6 +162,7 @@ export function createAmapClient({
         cityLimit: Boolean(query.city.trim()),
         showFields: 'business,photos',
         pageSize: 25,
+        ...(query.types?.trim() ? { types: query.types.trim() } : {}),
       })
       if (response.status !== '1' || !Array.isArray(response.pois)) {
         diagnostic({

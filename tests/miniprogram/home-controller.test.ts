@@ -49,3 +49,19 @@ it('pre-encodes the complete detail path instead of exposing a raw POI id to WXM
     items: [{ detailPath: '/pages/place-detail/index?v=1&poiId=poi%2F1%20%3F%25%26%23' }],
   })
 })
+
+it('keeps out-of-range favorites when the radius is set to all (0), still sorted by distance', async () => {
+  const center = { latitude: 31.23, longitude: 121.47 }
+  const api = {
+    listFavorites: vi.fn().mockResolvedValue([
+      { poiId: 'far', name: '远店', location: { latitude: 31.30, longitude: 121.47 } },
+      { poiId: 'near', name: '近店', location: { latitude: 31.231, longitude: 121.47 } },
+    ]),
+  }
+  const controller = createHomeController(api)
+
+  await expect(controller.load(center, 0)).resolves.toMatchObject({
+    status: 'ready',
+    items: [{ poiId: 'near' }, { poiId: 'far' }],
+  })
+})

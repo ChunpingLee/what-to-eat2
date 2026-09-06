@@ -1,9 +1,27 @@
 <view class="page">
-  <view class="title">设置与个人数据</view>
-  <view class="notice">
-    <view>你可以删除本账号的收藏、导入记录、推荐反馈和用户记录。</view>
-    <view>公开餐厅数据和其他用户数据不会被删除。</view>
+  <view class="profile">
+    <view class="avatar">🍜</view>
+    <view class="profile-body">
+      <view class="profile-title">我的</view>
+      <view class="profile-sub">收藏与个人数据只属于你</view>
+    </view>
   </view>
-  <button class="danger" loading="{{deleting}}" disabled="{{deleting}}" bindtap="onDeleteAccount">注销账号并删除个人数据</button>
-  <view wx:if="{{errorMessage}}" class="error">{{errorMessage}}</view>
+
+  <view class="card info-card">
+    <view class="info-title">数据与隐私</view>
+    <view class="info-row">
+      <view class="info-emoji">🔒</view>
+      <view class="info-text">你可以删除本账号的收藏、导入记录、推荐反馈和用户记录。</view>
+    </view>
+    <view class="info-row">
+      <view class="info-emoji">🌐</view>
+      <view class="info-text">公开餐厅数据和其他用户数据不会被删除。</view>
+    </view>
+  </view>
+
+  <view class="danger-zone">
+    <view class="danger-title">危险操作</view>
+    <button class="danger-btn" loading="{{deleting}}" disabled="{{deleting}}" bindtap="onDeleteAccount">注销账号并删除个人数据</button>
+    <view wx:if="{{errorMessage}}" class="error">{{errorMessage}}</view>
+  </view>
 </view>

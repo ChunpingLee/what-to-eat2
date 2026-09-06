@@ -1,5 +1,88 @@
-.page { min-height: 100vh; padding: 32rpx; background: #f7f8fa; color: #1f2937; }
-.title { margin-bottom: 24rpx; font-size: 38rpx; font-weight: 600; }
-.notice, .error { padding: 24rpx; border-radius: 16rpx; background: #fff; font-size: 26rpx; line-height: 1.7; }
-.danger { margin-top: 32rpx; background: #b91c1c; color: #fff; }
-.error { margin-top: 24rpx; color: #b91c1c; }
+.profile {
+  padding: 32rpx 8rpx 36rpx;
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+}
+
+.avatar {
+  width: 108rpx;
+  height: 108rpx;
+  border-radius: 36rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 56rpx;
+  background: var(--tag-bg);
+  box-shadow: var(--shadow);
+}
+
+.profile-title {
+  font-size: 44rpx;
+  font-weight: 700;
+  color: var(--title);
+}
+
+.profile-sub {
+  margin-top: 6rpx;
+  font-size: 24rpx;
+  color: var(--sub);
+}
+
+.info-card {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+}
+
+.info-title {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: var(--title);
+}
+
+.info-row {
+  display: flex;
+  gap: 16rpx;
+  align-items: flex-start;
+}
+
+.info-emoji {
+  font-size: 30rpx;
+  line-height: 1.5;
+}
+
+.info-text {
+  flex: 1;
+  color: var(--sub);
+  font-size: 26rpx;
+  line-height: 1.6;
+}
+
+.danger-zone {
+  margin-top: 44rpx;
+}
+
+.danger-title {
+  font-size: 24rpx;
+  color: var(--sub2);
+  margin: 0 8rpx 16rpx;
+}
+
+.danger-btn {
+  width: 100%;
+  height: 92rpx;
+  border-radius: 24rpx;
+  background: #FDEDEA;
+  color: var(--danger);
+  font-size: 28rpx;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.danger-btn[disabled] {
+  opacity: 0.6;
+  color: var(--danger);
+}

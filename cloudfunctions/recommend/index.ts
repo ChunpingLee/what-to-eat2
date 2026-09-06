@@ -1,6 +1,7 @@
 import type { Place } from '../../src/domain/favorites'
 import { distanceMeters } from '../../src/domain/geo'
 import { findRestaurantCategory, restaurantCategoryAliases } from '../../src/domain/restaurant-categories'
+import type { GeoPoint, TravelMode } from '../../src/shared/types'
 import {
   rankRecommendations,
   type RankedPlace,
@@ -30,6 +31,8 @@ export interface RecommendationSearchClient {
 
 export interface RecommendationItem extends RankedPlace {
   travelTimeUnavailable: boolean
+  walkingMinutes?: number
+  drivingMinutes?: number
 }
 
 export interface RecommendationResult {
@@ -103,10 +106,19 @@ function matchesBudget(place: Place, budget: RecommendationRequest['budget']): b
     && (budget.max === undefined || place.averageCost <= budget.max)
 }
 
-function searchKeywords(request: RecommendationRequest): string {
-  if (request.random) return '餐饮服务'
-  if (text(request.keywords)) return text(request.keywords)
-  return findRestaurantCategory(request.category)?.searchKeyword ?? text(request.category)
+/** 高德 POI 分类：050000 餐饮服务大类。 */
+const RESTAURANT_TYPECODE = '050000'
+
+function searchFilter(request: RecommendationRequest): { keywords: string; types?: string } {
+  // 不限/随便吃：keywords 是对门店名的模糊匹配而非分类过滤，会混入非餐厅 POI；
+  // 改用分类码检索周边全部餐饮门店。
+  if (request.random) return { keywords: '', types: RESTAURANT_TYPECODE }
+  if (text(request.keywords)) return { keywords: text(request.keywords) }
+  const category = findRestaurantCategory(request.category)
+  return {
+    keywords: category?.searchKeyword ?? text(request.category),
+    ...(category?.typecode ? { types: category.typecode } : {}),
+  }
 }
 
 function withRouteTimes(
@@ -124,6 +136,32 @@ function withRouteTimes(
   })
 }
 
+interface DisplayTravelTimes {
+  walkingMinutes?: number
+  drivingMinutes?: number
+}
+
+/** 展示用的分模式时间：单个模式整体失败只丢该模式的展示，不影响结果本身。 */
+async function collectDisplayTimes(
+  routeClient: RouteTimesClient,
+  center: GeoPoint,
+  destinations: GeoPoint[],
+  modes: Array<'walking' | 'driving'>,
+): Promise<Partial<Record<'walking' | 'driving', Array<number | undefined>>>> {
+  const entries = await Promise.all(modes.map(async mode => {
+    try {
+      return [mode, await routeClient.times(center, destinations, mode)] as const
+    } catch {
+      return undefined
+    }
+  }))
+  const times: Partial<Record<'walking' | 'driving', Array<number | undefined>>> = {}
+  for (const entry of entries) {
+    if (entry) times[entry[0]] = entry[1]
+  }
+  return times
+}
+
 export function createRecommendHandler(deps: {
   searchClient: RecommendationSearchClient
   routeClient: RouteTimesClient
@@ -131,7 +169,7 @@ export function createRecommendHandler(deps: {
   return async (request: RecommendationRequest): Promise<RecommendationResult> => {
     validate(request)
     const searchResult = await deps.searchClient.search({
-      keywords: searchKeywords(request),
+      ...searchFilter(request),
       center: request.center,
       city: '',
       radiusMeters: request.radiusMeters,
@@ -148,22 +186,52 @@ export function createRecommendHandler(deps: {
       distanceMeters: item.distanceMeters,
     }))
     let routed = routeCandidates
+    let selectedTimes: Array<number | undefined> | undefined
     if (routeCandidates.length > 0) {
       try {
-        const times = await deps.routeClient.times(
+        selectedTimes = await deps.routeClient.times(
           request.center,
           routeCandidates.map(candidate => candidate.place.location),
           request.travelMode,
         )
-        routed = withRouteTimes(routeCandidates, times, request.maxMinutes)
+        routed = withRouteTimes(routeCandidates, selectedTimes, request.maxMinutes)
       } catch {
+        // 路线服务整体不可用：按距离回落，不再为展示补算（避免对故障中的服务加倍请求）。
         routed = routeCandidates
       }
     }
 
-    const items = rankRecommendations(routed, request).slice(0, 10).map(item => ({
+    const top = rankRecommendations(routed, request).slice(0, 10)
+    // 步行/驾车展示时间：选定方式已算过的直接复用，其余只为最终 10 家补算，控制路线 API 调用量。
+    const selectedIsChipMode = selectedTimes !== undefined
+      && (request.travelMode === 'walking' || request.travelMode === 'driving')
+    const displayTimes: DisplayTravelTimes[] = top.map(item =>
+      selectedIsChipMode && item.travelMinutes !== undefined
+        ? request.travelMode === 'walking'
+          ? { walkingMinutes: item.travelMinutes }
+          : { drivingMinutes: item.travelMinutes }
+        : {})
+    const missingModes = selectedTimes === undefined ? []
+      : (['walking', 'driving'] as const).filter(mode => !(selectedIsChipMode && request.travelMode === mode))
+    if (missingModes.length > 0 && top.length > 0) {
+      const times = await collectDisplayTimes(
+        deps.routeClient,
+        request.center,
+        top.map(item => item.place.location),
+        missingModes,
+      )
+      top.forEach((_item, index) => {
+        const walkingMinutes = times.walking?.[index]
+        const drivingMinutes = times.driving?.[index]
+        if (walkingMinutes !== undefined) displayTimes[index] = { ...displayTimes[index], walkingMinutes }
+        if (drivingMinutes !== undefined) displayTimes[index] = { ...displayTimes[index], drivingMinutes }
+      })
+    }
+
+    const items: RecommendationItem[] = top.map((item, index) => ({
       ...item,
       travelTimeUnavailable: item.travelMinutes === undefined,
+      ...displayTimes[index],
     }))
     return {
       items,

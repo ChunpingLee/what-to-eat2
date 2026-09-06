@@ -1,60 +1,159 @@
 <view class="page">
-  <view class="title">附近推荐</view>
-  <view class="hint">按真实距离、路线时间与门店公开信息，挑出现在更合适的选择。</view>
-
-  <view class="section">
-    <view class="section-title">固定品类</view>
-    <view class="chips">
-      <button wx:for="{{categoryOptions}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-category="{{item.value}}" bindtap="onCategory">{{item.label}}</button>
-    </view>
-    <view class="section-title">任意关键词</view>
-    <input class="input" placeholder="例如：潮汕牛肉火锅" bindfocus="onKeywordFocus" bindinput="onKeywordInput" />
-    <button class="random {{preferenceMode === 'random' ? 'selected' : ''}}" bindtap="onRandom">随便吃</button>
+  <view class="header">
+    <view class="headline">帮你挑</view>
+    <view class="subtitle">附近推荐：按真实距离、路线时间与门店信息，挑出现在更合适的一家。</view>
   </view>
 
-  <view class="section">
-    <view class="section-title">预算（人均，可选）</view>
-    <view class="row">
-      <input class="number-input" type="number" placeholder="最低" bindinput="onBudgetMinInput" />
-      <text class="separator">至</text>
-      <input class="number-input" type="number" placeholder="最高" bindinput="onBudgetMaxInput" />
-    </view>
-
-    <view class="section-title">范围</view>
-    <view class="chips">
-      <button wx:for="{{radiusOptions}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-radius="{{item.value}}" bindtap="onRadius">{{item.label}}</button>
-    </view>
-
-    <view class="section-title">出行方式</view>
-    <view class="chips">
-      <button wx:for="{{travelOptions}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-mode="{{item.value}}" bindtap="onTravelMode">{{item.label}}</button>
-    </view>
-
-    <view class="section-title">最长时间（分钟，可选）</view>
-    <input class="input" type="number" placeholder="例如：30" bindinput="onMaxMinutesInput" />
+  <view class="filter-bar" bindtap="onToggleFilters">
+    <view class="filter-bar-icon">🎯</view>
+    <view class="filter-summary">{{filterSummary}}</view>
+    <view class="filter-toggle">{{filtersOpen ? '收起 ▴' : '筛选 ▾'}}</view>
   </view>
 
-  <button class="primary" loading="{{status === 'loading'}}" disabled="{{status === 'loading'}}" bindtap="onRecommend">用当前位置推荐</button>
-  <button class="secondary" disabled="{{status === 'loading'}}" bindtap="onManualLocation">手动选择地点</button>
+  <block wx:if="{{filtersOpen}}">
+    <view class="card q-card">
+      <view class="card-label">今天想吃什么</view>
+      <view class="chips">
+        <button class="chip {{preferenceMode === 'any' ? 'active' : ''}}" bindtap="onAnyCategory">不限</button>
+        <button wx:for="{{categoryOptions}}" wx:key="value" class="chip {{item.selected ? 'active' : ''}}" data-category="{{item.value}}" bindtap="onCategory">{{item.label}}</button>
+      </view>
+      <view class="kw-row">
+        <input class="input kw-input" placeholder="或输入关键词，如：潮汕牛肉火锅" bindfocus="onKeywordFocus" bindinput="onKeywordInput" />
+        <button class="dice {{preferenceMode === 'random' ? 'active' : ''}}" bindtap="onRandom">🎲 随便</button>
+      </view>
+    </view>
 
-  <view wx:if="{{status === 'locationRequired'}}" class="notice">无法使用当前位置。你可以手动选择本次查询地点。</view>
+    <view class="card filter-card">
+      <view class="filter-grid">
+        <view class="filter-cell">
+          <view class="card-label">预算下限</view>
+          <input class="input mini-input" type="number" placeholder="¥ 最低" bindinput="onBudgetMinInput" />
+        </view>
+        <view class="filter-divider">—</view>
+        <view class="filter-cell">
+          <view class="card-label">预算上限</view>
+          <input class="input mini-input" type="number" placeholder="¥ 最高" bindinput="onBudgetMaxInput" />
+        </view>
+        <view class="filter-cell">
+          <view class="card-label">最长路程</view>
+          <input class="input mini-input" type="number" placeholder="如 30" bindinput="onMaxMinutesInput" />
+        </view>
+      </view>
+
+      <view class="card-label">搜索范围</view>
+      <view class="chips">
+        <button wx:for="{{radiusOptions}}" wx:key="value" class="chip {{item.selected ? 'active' : ''}}" data-radius="{{item.value}}" bindtap="onRadius">{{item.label}}</button>
+      </view>
+
+      <view class="card-label">出行方式</view>
+      <view class="chips">
+        <button wx:for="{{travelOptions}}" wx:key="value" class="chip {{item.selected ? 'active' : ''}}" data-mode="{{item.value}}" bindtap="onTravelMode">{{item.label}}</button>
+      </view>
+    </view>
+  </block>
+
+  <button class="btn-primary cta" loading="{{status === 'loading'}}" disabled="{{status === 'loading'}}" bindtap="onRecommend">📍 用当前位置推荐</button>
+  <button class="btn-ghost cta-ghost" disabled="{{status === 'loading'}}" bindtap="onManualLocation">手动选择地点</button>
+
+  <view wx:if="{{status === 'loading'}}" class="loading-row">
+    <view class="loading-dot"></view>
+    <text>正在按当前条件挑选…</text>
+  </view>
+  <view wx:if="{{status === 'locationRequired'}}" class="notice">无法使用当前位置，可手动选择本次查询地点。</view>
   <view wx:if="{{status === 'error'}}" class="error">{{errorMessage}}</view>
   <view wx:if="{{errorMessage && status !== 'error'}}" class="error">{{errorMessage}}</view>
   <view wx:if="{{stale}}" class="notice">正在使用稍早更新的门店数据（{{sourceUpdatedAt}}）。</view>
-  <view wx:if="{{status === 'empty'}}" class="empty">没有符合条件的餐厅。可放宽最长时间或扩大范围后，再次点击推荐。</view>
-
-  <view wx:for="{{items}}" wx:key="poiId" class="card">
-    <view class="card-title">{{item.place.name}}</view>
-    <view class="meta">约 {{item.distanceMeters}} 米</view>
-    <view wx:if="{{item.travelTimeUnavailable}}" class="warning">出行时间未计算，仅按距离推荐，不代表满足最长时间</view>
-    <view wx:else class="meta">预计 {{item.travelMinutes}} 分钟</view>
-    <view wx:if="{{item.place.address}}" class="address">{{item.place.address}}</view>
-    <view class="reasons">
-      <text wx:for="{{item.reasons}}" wx:for-item="reason" wx:key="*this" class="reason">{{reason}}</text>
-    </view>
-    <view class="actions">
-      <button class="card-action" disabled="{{item.added || savingPoiId === item.place.poiId}}" loading="{{savingPoiId === item.place.poiId}}" data-poi-id="{{item.place.poiId}}" bindtap="onAddFavorite">{{item.added ? '已收藏' : '加入想吃'}}</button>
-      <button class="card-action" data-latitude="{{item.place.location.latitude}}" data-longitude="{{item.place.location.longitude}}" data-name="{{item.place.name}}" data-address="{{item.place.address || ''}}" bindtap="onOpenLocation">地图导航</button>
-    </view>
+  <view wx:if="{{status === 'empty'}}" class="empty">
+    <view class="empty-emoji">🍽️</view>
+    <view class="empty-title">没有符合条件的餐厅</view>
+    <view class="empty-sub">放宽最长时间或扩大范围后再试一次。</view>
   </view>
+
+  <block wx:for="{{items}}" wx:key="poiId">
+    <view wx:if="{{index === 0}}" class="top1">
+      <view class="top1-head">
+        <view class="top1-rank">TOP 1 · 现在就去</view>
+        <view wx:if="{{item.costText}}" class="top1-cost">{{item.costText}}</view>
+      </view>
+      <view class="top1-body">
+        <view class="top1-score">
+          <view class="top1-score-num">{{item.scorePct}}</view>
+          <view class="top1-score-unit">匹配度</view>
+        </view>
+        <view class="top1-info">
+          <view class="top1-name">{{item.place.name}}</view>
+          <view class="top1-meta">{{item.metaText}}</view>
+          <view wx:if="{{item.place.address}}" class="top1-address">{{item.place.address}}</view>
+        </view>
+        <image wx:if="{{item.place.photos.length}}" class="top1-photo" src="{{item.place.photos[0]}}" mode="aspectFill" lazy-load />
+        <view wx:else class="top1-photo top1-photo-empty">🍽️</view>
+      </view>
+
+      <view wx:if="{{item.walkText || item.driveText}}" class="top1-travel">
+        <text wx:if="{{item.walkText}}" class="travel-chip top1-travel-chip">{{item.walkText}}</text>
+        <text wx:if="{{item.driveText}}" class="travel-chip top1-travel-chip">{{item.driveText}}</text>
+      </view>
+
+      <view class="bars">
+        <view wx:if="{{item.proximityLabel}}" class="bar-row">
+          <view class="bar-caption">
+            <text>{{item.proximityLabel}}</text>
+            <text wx:if="{{item.proximity !== undefined}}" class="bar-value">{{item.proximity}}%</text>
+          </view>
+          <view class="bar-track">
+            <view class="bar-fill" style="width: {{item.proximity || 0}}%"></view>
+          </view>
+        </view>
+        <view wx:if="{{item.ratingLabel}}" class="bar-row">
+          <view class="bar-caption">
+            <text>{{item.ratingLabel}}</text>
+            <text class="bar-value">{{item.rating}}%</text>
+          </view>
+          <view class="bar-track">
+            <view class="bar-fill bar-fill-soft" style="width: {{item.rating}}%"></view>
+          </view>
+        </view>
+      </view>
+
+      <view class="top1-reasons">
+        <text wx:for="{{item.reasons}}" wx:for-item="reason" wx:key="*this" class="reason-tag">{{reason}}</text>
+      </view>
+
+      <view wx:if="{{item.travelTimeUnavailable}}" class="top1-warning">出行时间未计算，仅按距离推荐，不代表满足最长时间</view>
+
+      <view class="top1-actions">
+        <button class="top1-fav {{item.added ? 'done' : ''}}" disabled="{{item.added || savingPoiId === item.place.poiId}}" loading="{{savingPoiId === item.place.poiId}}" data-poi-id="{{item.place.poiId}}" bindtap="onAddFavorite">{{item.added ? '✓ 已收藏' : '加入想吃'}}</button>
+        <button class="top1-nav" data-latitude="{{item.place.location.latitude}}" data-longitude="{{item.place.location.longitude}}" data-name="{{item.place.name}}" data-address="{{item.place.address || ''}}" bindtap="onOpenLocation">导航</button>
+      </view>
+    </view>
+
+    <view wx:else class="r-card">
+      <view class="r-head">
+        <view class="r-rank">{{item.rankIndex + 1}}</view>
+        <view class="r-body">
+          <view class="r-name">{{item.place.name}}</view>
+          <view class="r-meta">
+            <text>{{item.metaText}}</text>
+            <text wx:if="{{item.costText}}" class="r-cost">{{item.costText}}</text>
+          </view>
+          <view wx:if="{{item.place.address}}" class="r-address">{{item.place.address}}</view>
+        </view>
+        <image wx:if="{{item.place.photos.length}}" class="r-photo" src="{{item.place.photos[0]}}" mode="aspectFill" lazy-load />
+        <view wx:else class="r-photo r-photo-empty">🍽️</view>
+        <view class="r-score">
+          <view class="r-score-num">{{item.scorePct}}</view>
+          <view class="r-score-unit">匹配</view>
+        </view>
+      </view>
+      <view wx:if="{{item.walkText || item.driveText}}" class="r-travel">
+        <text wx:if="{{item.walkText}}" class="travel-chip">{{item.walkText}}</text>
+        <text wx:if="{{item.driveText}}" class="travel-chip">{{item.driveText}}</text>
+      </view>
+      <view wx:if="{{item.travelTimeUnavailable}}" class="r-warning">出行时间未计算，仅按距离推荐</view>
+      <view class="r-actions">
+        <button class="r-fav {{item.added ? 'done' : ''}}" disabled="{{item.added || savingPoiId === item.place.poiId}}" loading="{{savingPoiId === item.place.poiId}}" data-poi-id="{{item.place.poiId}}" bindtap="onAddFavorite">{{item.added ? '✓ 已收藏' : '加入想吃'}}</button>
+        <button class="r-nav" data-latitude="{{item.place.location.latitude}}" data-longitude="{{item.place.location.longitude}}" data-name="{{item.place.name}}" data-address="{{item.place.address || ''}}" bindtap="onOpenLocation">导航</button>
+      </view>
+    </view>
+  </block>
 </view>

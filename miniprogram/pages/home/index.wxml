@@ -1,43 +1,94 @@
 <view class="page">
-  <view class="location-notice">我们仅在你查看附近收藏时使用当前位置，不会保存持续位置轨迹。</view>
-
-  <view class="radius-row" aria-label="搜索半径">
-    <button wx:for="{{radiusOptions}}" wx:key="*this" class="radius-button {{radiusMeters === item * 1000 ? 'active' : ''}}" data-radius="{{item}}" bindtap="onRadiusChange">{{item}} 公里</button>
+  <view class="header">
+    <view class="header-text">
+      <view class="greeting">今天</view>
+      <view class="headline">最想吃点啥？</view>
+    </view>
+    <navigator url="/pages/import/index" class="import-btn" aria-label="粘贴分享链接导入">
+      <text class="import-icon">🔗</text>
+      <text>导入</text>
+    </navigator>
   </view>
 
-  <navigator url="/pages/place-search/index" class="recommend-link">
-    <button class="recommend-button">加入想吃 / 搜索分店</button>
-  </navigator>
-  <navigator url="/pages/import/index" class="recommend-link">
-    <button class="secondary">粘贴分享链接导入</button>
-  </navigator>
-  <navigator url="/pages/settings/index" class="recommend-link">
-    <button class="secondary">设置与个人数据</button>
+  <navigator url="/pages/place-search/index" class="search-bar">
+    <text class="search-icon">🔍</text>
+    <text class="search-text">搜索餐厅 / 分店</text>
+    <text class="entry-arrow">›</text>
   </navigator>
 
-  <view wx:if="{{status === 'locationRequired'}}" class="location-required">
-    <text>需要地点才能按距离展示你的收藏。</text>
-    <button bindtap="requestCurrentLocation">允许定位</button>
-    <button class="secondary" bindtap="onManualLocation">手动选择地点</button>
+  <view class="toolbar">
+    <view class="toolbar-label">附近范围</view>
+    <view class="seg">
+      <button wx:for="{{radiusOptions}}" wx:key="*this" class="seg-item {{radiusMeters === item * 1000 ? 'active' : ''}}" data-radius="{{item}}" bindtap="onRadiusChange">{{item === 0 ? '全部' : item + 'km'}}</button>
+    </view>
+    <view class="privacy">仅在查看附近收藏时使用当前位置，不保存轨迹。</view>
+  </view>
+
+  <view wx:if="{{status === 'locationRequired'}}" class="locate-card">
+    <view class="locate-emoji">📍</view>
+    <view class="locate-title">需要地点才能按距离排队</view>
+    <view class="locate-sub">允许定位，或手动选一个位置。</view>
+    <button class="btn-primary" bindtap="requestCurrentLocation">允许定位</button>
+    <button class="btn-ghost locate-ghost" bindtap="onManualLocation">手动选择地点</button>
   </view>
 
   <view wx:else>
-    <view wx:if="{{status === 'loading'}}" class="hint">正在加载附近收藏…</view>
+    <view wx:if="{{status === 'loading'}}" class="loading-row">
+      <view class="loading-dot"></view>
+      <text>正在寻找附近想吃…</text>
+    </view>
+
     <view wx:if="{{status === 'error'}}" class="error">
       <text>加载失败：{{errorMessage}}</text>
-      <button bindtap="onRetry">重试</button>
+      <button class="error-retry" bindtap="onRetry">重试</button>
     </view>
-    <view wx:if="{{status === 'empty'}}" class="hint">这个范围内还没有收藏。</view>
 
-    <navigator wx:for="{{items}}" wx:key="poiId" class="favorite-card" url="{{item.detailPath}}">
-      <view class="name">{{item.place.name}}</view>
-      <view class="address">{{item.place.address || ''}}</view>
-      <view class="distance">{{item.distanceMeters}} 米</view>
-    </navigator>
+    <block wx:if="{{items.length}}">
+      <view class="section-head">
+        <text class="section-title">今晚就吃它</text>
+        <text class="section-note">按距离最近排在前</text>
+      </view>
 
-    <navigator wx:if="{{showRecommend}}" url="/pages/recommend/index" class="recommend-link">
-      <button class="recommend-button">换成附近推荐</button>
+      <navigator url="{{items[0].detailPath}}" class="hero" wx:if="{{items.length > 0}}">
+        <view class="hero-badge">离你最近</view>
+        <view class="hero-name">{{items[0].place.name}}</view>
+        <view class="hero-meta">
+          <text class="hero-distance">{{items[0].distanceLabel}}</text>
+          <text wx:if="{{items[0].place.address}}" class="hero-address">{{items[0].place.address}}</text>
+        </view>
+        <view class="hero-actions">
+          <button class="hero-go" data-latitude="{{items[0].place.location.latitude}}" data-longitude="{{items[0].place.location.longitude}}" data-name="{{items[0].place.name}}" data-address="{{items[0].place.address || ''}}" catchtap="onOpenLocation">出发去吃</button>
+          <view class="hero-more">详情 ›</view>
+        </view>
+      </navigator>
+
+      <view class="section-head" wx:if="{{items.length > 1}}">
+        <text class="section-title">想吃清单</text>
+        <text class="section-note">{{items.length}} 家</text>
+      </view>
+      <navigator wx:for="{{items}}" wx:key="poiId" wx:if="{{index > 0}}" url="{{item.detailPath}}" class="list-card">
+        <view class="list-emoji">{{item.emoji}}</view>
+        <view class="list-body">
+          <view class="list-name">{{item.place.name}}</view>
+          <view class="list-address">{{item.place.address || ''}}</view>
+        </view>
+        <view class="list-distance">{{item.distanceLabel}}</view>
+      </navigator>
+    </block>
+
+    <view wx:if="{{status === 'empty'}}" class="empty">
+      <view class="empty-emoji">🍱</view>
+      <view class="empty-title">这个范围内还没有想吃</view>
+      <view class="empty-sub">搜索一家店，或粘贴朋友分享的链接。</view>
+    </view>
+
+    <navigator wx:if="{{showRecommend}}" url="/pages/recommend/index" open-type="switchTab" class="switch-card">
+      <view class="switch-icon">🎲</view>
+      <view class="switch-body">
+        <view class="switch-title">不知道吃什么？</view>
+        <view class="switch-sub">用附近推荐帮你挑</view>
+      </view>
+      <view class="entry-arrow">›</view>
     </navigator>
-    <button class="secondary" bindtap="onManualLocation">手动选择地点</button>
   </view>
 </view>
