@@ -70,7 +70,7 @@
   </view>
 
   <block wx:for="{{items}}" wx:key="poiId">
-    <view wx:if="{{index === 0}}" class="top1">
+    <navigator wx:if="{{index === 0}}" url="{{item.detailPath}}" class="top1">
       <view class="top1-head">
         <view class="top1-rank">TOP 1 · 现在就去</view>
         <view wx:if="{{item.costText}}" class="top1-cost">{{item.costText}}</view>
@@ -122,12 +122,12 @@
       <view wx:if="{{item.travelTimeUnavailable}}" class="top1-warning">出行时间未计算，仅按距离推荐，不代表满足最长时间</view>
 
       <view class="top1-actions">
-        <button class="top1-fav {{item.added ? 'done' : ''}}" disabled="{{item.added || savingPoiId === item.place.poiId}}" loading="{{savingPoiId === item.place.poiId}}" data-poi-id="{{item.place.poiId}}" bindtap="onAddFavorite">{{item.added ? '✓ 已收藏' : '加入想吃'}}</button>
-        <button class="top1-nav" data-latitude="{{item.place.location.latitude}}" data-longitude="{{item.place.location.longitude}}" data-name="{{item.place.name}}" data-address="{{item.place.address || ''}}" bindtap="onOpenLocation">导航</button>
+        <button class="top1-fav {{item.added ? 'done' : ''}}" disabled="{{item.added || savingPoiId === item.place.poiId}}" loading="{{savingPoiId === item.place.poiId}}" data-poi-id="{{item.place.poiId}}" catchtap="onAddFavorite">{{item.added ? '✓ 已收藏' : '加入想吃'}}</button>
+        <button class="top1-nav" data-latitude="{{item.place.location.latitude}}" data-longitude="{{item.place.location.longitude}}" data-name="{{item.place.name}}" data-address="{{item.place.address || ''}}" catchtap="onOpenLocation">导航</button>
       </view>
-    </view>
+    </navigator>
 
-    <view wx:else class="r-card">
+    <navigator wx:else url="{{item.detailPath}}" class="r-card">
       <view class="r-head">
         <view class="r-rank">{{item.rankIndex + 1}}</view>
         <view class="r-body">
@@ -151,9 +151,9 @@
       </view>
       <view wx:if="{{item.travelTimeUnavailable}}" class="r-warning">出行时间未计算，仅按距离推荐</view>
       <view class="r-actions">
-        <button class="r-fav {{item.added ? 'done' : ''}}" disabled="{{item.added || savingPoiId === item.place.poiId}}" loading="{{savingPoiId === item.place.poiId}}" data-poi-id="{{item.place.poiId}}" bindtap="onAddFavorite">{{item.added ? '✓ 已收藏' : '加入想吃'}}</button>
-        <button class="r-nav" data-latitude="{{item.place.location.latitude}}" data-longitude="{{item.place.location.longitude}}" data-name="{{item.place.name}}" data-address="{{item.place.address || ''}}" bindtap="onOpenLocation">导航</button>
+        <button class="r-fav {{item.added ? 'done' : ''}}" disabled="{{item.added || savingPoiId === item.place.poiId}}" loading="{{savingPoiId === item.place.poiId}}" data-poi-id="{{item.place.poiId}}" catchtap="onAddFavorite">{{item.added ? '✓ 已收藏' : '加入想吃'}}</button>
+        <button class="r-nav" data-latitude="{{item.place.location.latitude}}" data-longitude="{{item.place.location.longitude}}" data-name="{{item.place.name}}" data-address="{{item.place.address || ''}}" catchtap="onOpenLocation">导航</button>
       </view>
-    </view>
+    </navigator>
   </block>
 </view>

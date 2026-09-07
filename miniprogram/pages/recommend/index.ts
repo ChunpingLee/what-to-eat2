@@ -2,6 +2,7 @@ import type { RecommendationRequest } from '../../../src/domain/recommendation'
 import type { GeoPoint, TravelMode } from '../../shared/types'
 import type { RecommendationItem, RecommendationResult } from '../../../cloudfunctions/recommend/index'
 import { FIXED_RESTAURANT_CATEGORIES } from '../../shared/restaurant-categories'
+import { buildShareDetailPath } from '../../shared/share'
 import { addFavoriteBatch, recommendPlaces } from '../../services/cloud'
 import { chooseManualLocation, getCurrentLocation } from '../../services/location'
 import { formatDistanceLabel } from '../home/controller'
@@ -21,6 +22,7 @@ interface DisplayBars {
 
 interface DisplayItem extends RecommendationItem, DisplayBars {
   poiId: string
+  detailPath: string
   added: boolean
   rankIndex: number
   scorePct: number
@@ -217,6 +219,7 @@ export function toDisplayItem(
     ...item,
     ...bars,
     poiId: item.place.poiId,
+    detailPath: buildShareDetailPath(item.place.poiId),
     added: false,
     rankIndex,
     scorePct: Math.round(item.score),

@@ -362,8 +362,11 @@ describe('recommendation page contract', () => {
     expect(script).toContain('walkingMinutes')
     expect(script).toContain('drivingMinutes')
     expect(page).toContain('wx:for="{{item.reasons}}"')
-    expect(page).toContain('bindtap="onAddFavorite"')
-    expect(page).toContain('bindtap="onOpenLocation"')
+    // 每家餐厅卡片整体可点进详情页；卡内收藏/导航按钮 catchtap 阻止冒泡触发跳转。
+    expect(page).toContain('url="{{item.detailPath}}"')
+    expect(script).toContain('buildShareDetailPath')
+    expect(page).toContain('catchtap="onAddFavorite"')
+    expect(page).toContain('catchtap="onOpenLocation"')
     expect(page).toContain('bindtap="onManualLocation"')
     expect(page).toContain('wx:key="poiId"')
     expect(script).toContain('chooseManualLocation')
