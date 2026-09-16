@@ -39,6 +39,8 @@ export function cacheKeyFor(query: PlaceSearchQuery) {
     city: normalizeText(query.city),
     radiusMeters: query.radiusMeters,
     types: query.types ? normalizeText(query.types) : '',
+    // 仅翻页请求单独缓存；page 1/缺省保持与旧 key 完全一致，兼容既有缓存条目。
+    ...(query.page !== undefined && query.page > 1 ? { page: query.page } : {}),
   })
   return createHash('sha256').update(normalized).digest('hex')
 }
@@ -61,7 +63,8 @@ function validate(query: PlaceSearchQuery) {
     || !query.center || typeof query.center !== 'object'
     || !Number.isFinite(query.center.latitude) || query.center.latitude < -90 || query.center.latitude > 90
     || !Number.isFinite(query.center.longitude) || query.center.longitude < -180 || query.center.longitude > 180
-    || !Number.isFinite(query.radiusMeters) || query.radiusMeters <= 0 || query.radiusMeters > 50_000) {
+    || !Number.isFinite(query.radiusMeters) || query.radiusMeters <= 0 || query.radiusMeters > 50_000
+    || (query.page !== undefined && (!Number.isInteger(query.page) || query.page < 1 || query.page > 100))) {
     throw new SafeError('INVALID_SEARCH_QUERY', 'Invalid place search query')
   }
 }

@@ -1,3 +1,4 @@
 {
-  "navigationBarTitleText": "附近推荐"
+  "navigationBarTitleText": "附近推荐",
+  "onReachBottomDistance": 100
 }

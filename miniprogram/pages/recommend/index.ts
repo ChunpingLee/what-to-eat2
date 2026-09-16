@@ -50,6 +50,9 @@ interface RecommendationData {
   savingPoiId: string
   filtersOpen: boolean
   filterSummary: string
+  hasMore: boolean
+  loadingMore: boolean
+  loadMoreError: string
 }
 
 interface DatasetEvent {
@@ -58,14 +61,23 @@ interface DatasetEvent {
 
 interface InputEvent { detail: { value?: unknown } }
 
+interface LastRecommendationQuery {
+  input: RecommendationInput
+  center: GeoPoint
+  page: number
+}
+
 interface RecommendationPage {
   data: RecommendationData
   /** Non-reactive input store: writing here never re-renders, so iOS same-layer inputs keep their text. */
   values?: { keywords: string; budgetMin: string; budgetMax: string; maxMinutes: string }
+  /** Non-reactive: last successful query snapshot, reused when loading more pages on scroll. */
+  lastQuery?: LastRecommendationQuery
   setData(data: Partial<RecommendationData>): void
   getTabBar?(): { setData(data: { selected: number }): void } | undefined
   onLoad(): void
   onShow(): void
+  onReachBottom(): void
   onCategory(event: DatasetEvent): void
   onAnyCategory(): void
   onToggleFilters(): void
@@ -82,6 +94,8 @@ interface RecommendationPage {
   onManualLocation(): void
   beginRecommendation(locate: typeof getCurrentLocation): void
   runRecommendation(intent: number, input: RecommendationInput, locate: typeof getCurrentLocation): Promise<void>
+  loadMore(): Promise<void>
+  onRetryLoadMore(): void
   onAddFavorite(event: DatasetEvent): Promise<void>
   onOpenLocation(event: DatasetEvent): void
 }
@@ -185,6 +199,15 @@ export function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value))
 }
 
+/** 展示口径跟随发起查询时的筛选快照，翻页项与首页项一致。 */
+function displayCtx(input: RecommendationInput) {
+  return {
+    maxMinutes: input.maxMinutes,
+    radiusMeters: input.radiusMeters,
+    travelMode: input.travelMode,
+  }
+}
+
 /** 与 src/domain/recommendation 打分口径一致：有 maxMinutes 用时间，否则用距离/半径。 */
 export function toDisplayItem(
   item: RecommendationItem,
@@ -229,6 +252,22 @@ export function toDisplayItem(
   }
 }
 
+/** 翻页追加：按 poiId 去重（高德相邻页可能重复返回），排名延续首页序号。 */
+export function appendDisplayItems(
+  existing: DisplayItem[],
+  fetched: RecommendationItem[],
+  ctx: { maxMinutes?: number; radiusMeters: number; travelMode: TravelMode },
+): DisplayItem[] {
+  const seen = new Set(existing.map(item => item.place.poiId))
+  const added: DisplayItem[] = []
+  for (const item of fetched) {
+    if (seen.has(item.place.poiId)) continue
+    seen.add(item.place.poiId)
+    added.push(toDisplayItem(item, existing.length + added.length, ctx))
+  }
+  return added
+}
+
 export function createRecommendationController(deps: {
   recommendPlaces(request: RecommendationRequest): Promise<RecommendationResult>
 }) {
@@ -238,11 +277,16 @@ export function createRecommendationController(deps: {
   return {
     beginIntent,
     isCurrent,
+    currentIntent: () => latestIntent,
     async locateAndRecommend(
       intent: number,
       input: RecommendationInput,
       locate: () => Promise<GeoPoint>,
-    ): Promise<{ status: 'success'; result: RecommendationResult } | { status: 'locationRequired' } | undefined> {
+    ): Promise<
+      | { status: 'success'; result: RecommendationResult; center: GeoPoint }
+      | { status: 'locationRequired' }
+      | undefined
+    > {
       if (!isCurrent(intent)) return undefined
       let center: GeoPoint
       try {
@@ -253,7 +297,7 @@ export function createRecommendationController(deps: {
       if (!isCurrent(intent)) return undefined
       try {
         const result = await deps.recommendPlaces({ ...input, center })
-        return isCurrent(intent) ? { status: 'success', result } : undefined
+        return isCurrent(intent) ? { status: 'success', result, center } : undefined
       } catch (error) {
         if (!isCurrent(intent)) return undefined
         throw error
@@ -301,6 +345,9 @@ const initialData: RecommendationData = {
   savingPoiId: '',
   filtersOpen: false,
   filterSummary: '不限品类 · 5公里 · 驾车',
+  hasMore: false,
+  loadingMore: false,
+  loadMoreError: '',
 }
 
 if (typeof Page === 'function') {
@@ -315,6 +362,10 @@ if (typeof Page === 'function') {
 
     onShow(this: RecommendationPage) {
       this.getTabBar?.()?.setData({ selected: 1 })
+    },
+
+    onReachBottom(this: RecommendationPage) {
+      void this.loadMore()
     },
 
     onCategory(this: RecommendationPage, event: DatasetEvent) {
@@ -400,7 +451,11 @@ if (typeof Page === 'function') {
         return
       }
       this.refreshFilterSummary()
-      this.setData({ status: 'loading', items: [], stale: false, errorMessage: '' })
+      this.lastQuery = undefined
+      this.setData({
+        status: 'loading', items: [], stale: false, errorMessage: '',
+        hasMore: false, loadingMore: false, loadMoreError: '',
+      })
       void submitter.run(() => this.runRecommendation(intent, input, locate))
     },
 
@@ -417,22 +472,48 @@ if (typeof Page === 'function') {
           this.setData({ status: 'locationRequired', errorMessage: '' })
           return
         }
-        const { result } = outcome
-        const ctx = {
-          maxMinutes: finiteOptional(this.values!.maxMinutes),
-          radiusMeters: this.data.radiusMeters,
-          travelMode: this.data.travelMode,
-        }
-        const items = result.items.map((item, index) => toDisplayItem(item, index, ctx))
+        const { result, center } = outcome
+        this.lastQuery = { input, center, page: 1 }
+        const items = result.items.map((item, index) => toDisplayItem(item, index, displayCtx(input)))
         this.setData({
           status: items.length ? 'ready' : 'empty',
           items,
           stale: result.stale,
           sourceUpdatedAt: result.sourceUpdatedAt,
+          hasMore: result.hasMore === true,
         })
       } catch (error) {
         this.setData({ status: 'error', errorMessage: visibleError(error) })
       }
+    },
+
+    async loadMore(this: RecommendationPage) {
+      const query = this.lastQuery
+      if (this.data.status !== 'ready' || !query || !this.data.hasMore || this.data.loadingMore) return
+      const intent = controller.currentIntent()
+      this.setData({ loadingMore: true, loadMoreError: '' })
+      try {
+        // 高德相邻页可能整页重复：最多连试 3 页全重复即停，等待下次上滑再试。
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const page = query.page + 1
+          const result = await recommendPlaces({ ...query.input, center: query.center, page })
+          if (!controller.isCurrent(intent)) return
+          const added = appendDisplayItems(this.data.items, result.items, displayCtx(query.input))
+          query.page = page
+          this.setData({ items: [...this.data.items, ...added], hasMore: result.hasMore === true })
+          if (added.length > 0 || result.hasMore !== true) break
+        }
+      } catch (error) {
+        if (controller.isCurrent(intent)) {
+          this.setData({ loadMoreError: '加载更多失败，点击重试' })
+        }
+      } finally {
+        if (controller.isCurrent(intent)) this.setData({ loadingMore: false })
+      }
+    },
+
+    onRetryLoadMore(this: RecommendationPage) {
+      void this.loadMore()
     },
 
     async onAddFavorite(this: RecommendationPage, event: DatasetEvent) {

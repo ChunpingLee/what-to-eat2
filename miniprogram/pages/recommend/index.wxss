@@ -586,3 +586,34 @@
   color: var(--title);
   border: 2rpx solid var(--line);
 }
+
+/* ---------- 上滑加载更多 ---------- */
+.load-more {
+  margin-top: 36rpx;
+  margin-bottom: 24rpx;
+  display: flex;
+  justify-content: center;
+}
+
+.load-more-loading {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  color: var(--sub);
+  font-size: 24rpx;
+}
+
+.load-more-hint,
+.load-more-done {
+  color: var(--sub2);
+  font-size: 24rpx;
+}
+
+.load-more-error {
+  padding: 14rpx 32rpx;
+  border-radius: 999rpx;
+  background: #FDEDEA;
+  color: var(--danger);
+  font-size: 24rpx;
+  font-weight: 600;
+}

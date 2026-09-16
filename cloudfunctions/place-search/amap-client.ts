@@ -10,6 +10,8 @@ export interface PlaceSearchQuery {
   radiusMeters: number
   /** 高德 POI 分类码（如 050000 餐饮服务）。提供后按分类检索，keywords 可为空。 */
   types?: string
+  /** 高德周边搜索页码（1 基）。仅 >1 时发送，第 1 页走 API 默认值。 */
+  page?: number
 }
 
 export interface AmapResponse { status?: unknown; pois?: unknown; info?: unknown; infocode?: unknown }
@@ -23,6 +25,7 @@ export interface AmapHttpQuery {
   showFields: string
   pageSize?: number
   types?: string
+  page?: number
 }
 export type AmapHttp = (query: AmapHttpQuery) => Promise<AmapResponse>
 
@@ -122,6 +125,8 @@ export function createAmapHttp(
         params.set('city_limit', String(query.cityLimit))
       }
       if (query.pageSize !== undefined) params.set('page_size', String(query.pageSize))
+      // 注意：v5 接口翻页参数是 page_num（v3 的 page 会被忽略，导致每次都返回第 1 页）。
+      if (query.page !== undefined && query.page > 1) params.set('page_num', String(query.page))
       const response = await fetcher(`https://restapi.amap.com/v5/place/around?${params}`, { signal: controller.signal })
       if (!response.ok) throw new SafeError('AMAP_UNAVAILABLE', 'Place search is temporarily unavailable')
       return await response.json() as AmapResponse
@@ -163,6 +168,7 @@ export function createAmapClient({
         showFields: 'business,photos',
         pageSize: 25,
         ...(query.types?.trim() ? { types: query.types.trim() } : {}),
+        ...(query.page !== undefined && query.page > 1 ? { page: query.page } : {}),
       })
       if (response.status !== '1' || !Array.isArray(response.pois)) {
         diagnostic({

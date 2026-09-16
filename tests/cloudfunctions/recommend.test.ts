@@ -7,17 +7,21 @@ import {
   createRecommendHandler,
   createLazyRouteTimesClient,
   main as recommendMain,
+  type RecommendationItem,
   type RecommendationSearchClient,
   type RouteTimesClient,
 } from '../../cloudfunctions/recommend/index'
+import { createAmapDistanceClient, createAmapDistanceHttp, type DistanceTimesClient } from '../../cloudfunctions/place-routes/amap-distance'
 import { createAmapRouteHttp, createAmapRoutesClient } from '../../cloudfunctions/place-routes/amap-routes'
 import { main as placeRoutesMain } from '../../cloudfunctions/place-routes/index'
 import { createAmapClient, createAmapHttp } from '../../cloudfunctions/place-search/amap-client'
 import {
+  appendDisplayItems,
   buildFilterSummary,
   buildRecommendationInput,
   createRecommendationController,
   createRecommendationSubmitter,
+  toDisplayItem,
 } from '../../miniprogram/pages/recommend/index'
 import { FIXED_RESTAURANT_CATEGORIES } from '../../src/domain/restaurant-categories'
 
@@ -46,29 +50,54 @@ function dependencies(items: Place[], travelMinutes: Array<number | undefined> =
   const searchClient: RecommendationSearchClient = {
     search: vi.fn().mockResolvedValue({ items, sourceUpdatedAt: '2026-08-17T00:00:00.000Z', stale: false }),
   }
+  const distanceClient: DistanceTimesClient = { times: vi.fn().mockResolvedValue(travelMinutes) }
   const routeClient: RouteTimesClient = { times: vi.fn().mockResolvedValue(travelMinutes) }
-  return { searchClient, routeClient }
+  return { searchClient, routeClient, distanceClient }
 }
 
 describe('recommend cloud function', () => {
-  it('pre-ranks by distance and quality before requesting routes for at most twenty candidates', async () => {
+  it('batch-queries distance times for at most twenty candidates when maxMinutes is set', async () => {
     const places = Array.from({ length: 30 }, (_, index) => place(index + 1)).reverse()
     const deps = dependencies(places, Array.from({ length: 20 }, () => 10))
 
     await createRecommendHandler(deps)(request)
 
-    // 第一次：选定方式（20 家，用于过滤与排序）；第二次：展示用的另一方式（仅最终 10 家）。
-    expect(deps.routeClient.times).toHaveBeenCalledTimes(2)
-    expect(deps.routeClient.times).toHaveBeenNthCalledWith(1,
+    // 第一次：选定方式（20 家窗口，用于 maxMinutes 过滤与排序）；第二次：并行预取另一方式（chips 用）。
+    expect(deps.distanceClient.times).toHaveBeenCalledTimes(2)
+    expect(deps.distanceClient.times).toHaveBeenNthCalledWith(1,
       center,
       Array.from({ length: 20 }, (_, index) => place(index + 1).location),
       'walking',
     )
-    expect(deps.routeClient.times).toHaveBeenNthCalledWith(2,
+    expect(deps.distanceClient.times).toHaveBeenNthCalledWith(2,
+      center,
+      Array.from({ length: 20 }, (_, index) => place(index + 1).location),
+      'driving',
+    )
+    // 步行/驾车不再走逐条路径规划（含限流），仅骑行需要。
+    expect(deps.routeClient.times).not.toHaveBeenCalled()
+  })
+
+  it('shrinks the time window to the result page when maxMinutes is unset', async () => {
+    const places = Array.from({ length: 30 }, (_, index) => place(index + 1)).reverse()
+    const deps = dependencies(places, Array.from({ length: 10 }, () => 10))
+
+    const result = await createRecommendHandler(deps)({ ...request, maxMinutes: undefined })
+
+    expect(deps.distanceClient.times).toHaveBeenCalledTimes(2)
+    expect(deps.distanceClient.times).toHaveBeenNthCalledWith(1,
+      center,
+      Array.from({ length: 10 }, (_, index) => place(index + 1).location),
+      'walking',
+    )
+    expect(deps.distanceClient.times).toHaveBeenNthCalledWith(2,
       center,
       Array.from({ length: 10 }, (_, index) => place(index + 1).location),
       'driving',
     )
+    // 无 maxMinutes 时 travelMinutes 不参与打分与过滤，排序与窗口收敛前完全一致。
+    expect(result.items.map(item => item.place.poiId))
+      .toEqual(Array.from({ length: 10 }, (_, index) => `p${String(index + 1).padStart(2, '0')}`))
   })
 
   it('hard-filters radius, preference and budget before routing', async () => {
@@ -84,7 +113,7 @@ describe('recommend cloud function', () => {
     const result = await createRecommendHandler(deps)(request)
 
     expect(result.items.map(item => item.place.poiId)).toEqual([inRange.poiId])
-    expect(deps.routeClient.times).toHaveBeenCalledWith(center, [inRange.location], 'walking')
+    expect(deps.distanceClient.times).toHaveBeenCalledWith(center, [inRange.location], 'walking')
   })
 
   it('does not filter on undocumented or unprovenanced business status values', async () => {
@@ -128,56 +157,74 @@ describe('recommend cloud function', () => {
     expect(result.items.map(item => item.place.poiId)).not.toContain('p03')
   })
 
-  it('reuses the selected mode time and fetches the other mode for the final ten', async () => {
+  it('reuses the selected mode batch time and prefetches the other mode in parallel', async () => {
     const deps = dependencies([place(1), place(2), place(3)])
-    vi.mocked(deps.routeClient.times).mockImplementation(async (_origin, destinations, mode) =>
+    vi.mocked(deps.distanceClient.times).mockImplementation(async (_origin, destinations, mode) =>
       destinations.map(() => (mode === 'driving' ? 8 : 24)))
 
     const result = await createRecommendHandler(deps)({ ...request, travelMode: 'driving' })
 
-    expect(vi.mocked(deps.routeClient.times).mock.calls.map(call => call[2])).toEqual(['driving', 'walking'])
+    expect(vi.mocked(deps.distanceClient.times).mock.calls.map(call => call[2])).toEqual(['driving', 'walking'])
     expect(result.items).toHaveLength(3)
     for (const item of result.items) {
       expect(item).toMatchObject({ travelMinutes: 8, drivingMinutes: 8, walkingMinutes: 24 })
     }
   })
 
-  it('fetches both walking and driving for display when the selected mode is bicycling', async () => {
+  it('computes bicycling per-item while batching both walking and driving chips in parallel', async () => {
     const deps = dependencies([place(1)])
-    vi.mocked(deps.routeClient.times).mockImplementation(async (_origin, _destinations, mode) =>
-      [mode === 'driving' ? 8 : 24])
+    vi.mocked(deps.routeClient.times).mockImplementation(async (_origin, destinations, mode) =>
+      destinations.map(() => (mode === 'bicycling' ? 18 : 24)))
+    vi.mocked(deps.distanceClient.times).mockImplementation(async (_origin, destinations, mode) =>
+      destinations.map(() => (mode === 'driving' ? 8 : 24)))
 
     const result = await createRecommendHandler(deps)({
       ...request, travelMode: 'bicycling', maxMinutes: undefined,
     })
 
-    expect(vi.mocked(deps.routeClient.times).mock.calls.map(call => call[2])).toEqual(['bicycling', 'walking', 'driving'])
-    expect(result.items[0]).toMatchObject({ travelMinutes: 24, walkingMinutes: 24, drivingMinutes: 8 })
+    expect(vi.mocked(deps.routeClient.times).mock.calls.map(call => call[2])).toEqual(['bicycling'])
+    expect(vi.mocked(deps.distanceClient.times).mock.calls.map(call => call[2])).toEqual(['walking', 'driving'])
+    expect(result.items[0]).toMatchObject({ travelMinutes: 18, walkingMinutes: 24, drivingMinutes: 8 })
   })
 
-  it('keeps distance results and never claims the time limit passed when the route request fails', async () => {
+  it('keeps distance results and never claims the time limit passed when the distance service fails', async () => {
     const deps = dependencies([place(1), place(2)])
-    vi.mocked(deps.routeClient.times).mockRejectedValue(new Error('upstream timeout: secret response'))
+    vi.mocked(deps.distanceClient.times).mockRejectedValue(new Error('upstream timeout: secret response'))
 
     const result = await createRecommendHandler(deps)(request)
 
     expect(result.items).toHaveLength(2)
     expect(result.items[0]).toMatchObject({ travelTimeUnavailable: true })
     expect(result.items[0]).not.toHaveProperty('travelMinutes')
-    // 路线服务整体失败后不再为展示补算，避免对故障中的服务加倍请求。
-    expect(deps.routeClient.times).toHaveBeenCalledOnce()
     expect(result.items[0]).not.toHaveProperty('walkingMinutes')
     expect(result.items[0]).not.toHaveProperty('drivingMinutes')
+    // 选定方式与 chips 预取共用距离测量服务：两次尝试都在并行阶段发出，失败后不追加请求。
+    expect(deps.distanceClient.times).toHaveBeenCalledTimes(2)
+    expect(deps.routeClient.times).not.toHaveBeenCalled()
   })
 
-  it('defers route client construction so missing route configuration uses the distance fallback', async () => {
+  it('never constructs the per-item route client for walking or driving requests', async () => {
+    const deps = dependencies([place(1)])
+    let factoryCalls = 0
+    deps.routeClient = createLazyRouteTimesClient(() => {
+      factoryCalls += 1
+      throw new Error('route key missing')
+    })
+
+    await expect(createRecommendHandler(deps)(request)).resolves.toMatchObject({
+      items: [{ place: { poiId: 'p01' }, travelMinutes: 10 }],
+    })
+    expect(factoryCalls).toBe(0)
+  })
+
+  it('falls back to distance ranking but keeps chips when the bicycling route client fails to construct', async () => {
     const deps = dependencies([place(1)])
     deps.routeClient = createLazyRouteTimesClient(() => {
       throw new Error('route key missing')
     })
 
-    await expect(createRecommendHandler(deps)(request)).resolves.toMatchObject({
-      items: [{ place: { poiId: 'p01' }, travelTimeUnavailable: true }],
+    await expect(createRecommendHandler(deps)({ ...request, travelMode: 'bicycling' })).resolves.toMatchObject({
+      items: [{ place: { poiId: 'p01' }, travelTimeUnavailable: true, walkingMinutes: 10, drivingMinutes: 10 }],
     })
   })
 
@@ -192,7 +239,10 @@ describe('recommend cloud function', () => {
     const result = await createRecommendHandler(deps)(request)
 
     expect(result.items).toHaveLength(expected)
-    if (count === 0) expect(deps.routeClient.times).not.toHaveBeenCalled()
+    if (count === 0) {
+      expect(deps.routeClient.times).not.toHaveBeenCalled()
+      expect(deps.distanceClient.times).not.toHaveBeenCalled()
+    }
   })
 
   it('returns the same order for the same input, including random mode', async () => {
@@ -216,6 +266,57 @@ describe('recommend cloud function', () => {
       code: 'INVALID_RECOMMENDATION_REQUEST', message: '推荐条件无效',
     })
     await expect(handler({ ...request, radiusMeters: 0 })).rejects.toMatchObject({
+      code: 'INVALID_RECOMMENDATION_REQUEST', message: '推荐条件无效',
+    })
+    expect(deps.searchClient.search).not.toHaveBeenCalled()
+  })
+
+  it('forwards the requested page to search and keeps page one implicit', async () => {
+    const places = Array.from({ length: 12 }, (_, index) => place(index + 1))
+    const deps = dependencies(places, Array.from({ length: 12 }, () => 10))
+    const handler = createRecommendHandler(deps)
+
+    await handler({ ...request, page: 1 })
+    expect(deps.searchClient.search).toHaveBeenCalledTimes(1)
+    expect(deps.searchClient.search).toHaveBeenLastCalledWith(expect.not.objectContaining({ page: expect.anything() }))
+
+    // 翻页累积读取：第 3 页请求会依次取第 1、2、3 页（前页来自缓存）。
+    await handler({ ...request, page: 3 })
+    expect(deps.searchClient.search).toHaveBeenCalledTimes(4)
+    expect(deps.searchClient.search).toHaveBeenNthCalledWith(3, expect.objectContaining({ page: 2 }))
+    expect(deps.searchClient.search).toHaveBeenNthCalledWith(4, expect.objectContaining({ page: 3 }))
+  })
+
+  it('continues the global ranking on later pages instead of skipping to the next search page', async () => {
+    const places = Array.from({ length: 25 }, (_, index) => place(index + 1))
+    const deps = dependencies(places, Array.from({ length: 20 }, () => 10))
+    const handler = createRecommendHandler(deps)
+
+    const first = await handler(request)
+    const second = await handler({ ...request, page: 2 })
+
+    expect(first.items.map(item => item.place.poiId))
+      .toEqual(Array.from({ length: 10 }, (_, index) => `p${String(index + 1).padStart(2, '0')}`))
+    expect(second.items.map(item => item.place.poiId))
+      .toEqual(Array.from({ length: 10 }, (_, index) => `p${String(index + 11).padStart(2, '0')}`))
+  })
+
+  it.each([
+    { count: 25, hasMore: true },
+    { count: 9, hasMore: false },
+  ])('reports hasMore $hasMore for a search page of $count items', async ({ count, hasMore }) => {
+    const places = Array.from({ length: count }, (_, index) => place(index + 1))
+    const deps = dependencies(places, places.slice(0, 20).map(() => 10))
+
+    const result = await createRecommendHandler(deps)(request)
+
+    expect(result.hasMore).toBe(hasMore)
+  })
+
+  it.each([0, 1.5, 11])('rejects out-of-range page %s before external calls', async page => {
+    const deps = dependencies([])
+
+    await expect(createRecommendHandler(deps)({ ...request, page })).rejects.toMatchObject({
       code: 'INVALID_RECOMMENDATION_REQUEST', message: '推荐条件无效',
     })
     expect(deps.searchClient.search).not.toHaveBeenCalled()
@@ -299,6 +400,98 @@ describe('Amap route client', () => {
   })
 })
 
+describe('Amap distance client', () => {
+  it('batch-measures driving and walking times in the inverted origins/destination form', async () => {
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({
+      status: '1',
+      results: [{ origin_id: '1', duration: '601' }, { origin_id: '2', duration: '120' }],
+    }) })
+    const client = createAmapDistanceClient({ key: 'server-only', http: createAmapDistanceHttp(fetcher as never) })
+
+    await expect(client.times(center, [place(1).location, place(2).location], 'driving')).resolves.toEqual([11, 2])
+    await expect(client.times(center, [place(1).location], 'walking')).resolves.toEqual([11])
+
+    expect(fetcher.mock.calls.map(call => new URL(call[0] as string).pathname)).toEqual(['/v3/distance', '/v3/distance'])
+    const driving = new URL(fetcher.mock.calls[0][0] as string).searchParams
+    // 餐厅列表作为 origins、用户位置作为 destination（多起点 → 单终点的接口形态）。
+    expect(driving.get('key')).toBe('server-only')
+    expect(driving.get('origins')).toBe('121.47,31.2301|121.47,31.2302')
+    expect(driving.get('destination')).toBe('121.47,31.23')
+    expect(driving.get('type')).toBe('1')
+    expect(new URL(fetcher.mock.calls[1][0] as string).searchParams.get('type')).toBe('3')
+  })
+
+  it('maps results back by origin_id and treats per-origin failures as unavailable', async () => {
+    const client = createAmapDistanceClient({
+      key: 'server-only',
+      http: vi.fn().mockResolvedValue({
+        status: '1',
+        results: [
+          { origin_id: '3', duration: 60 },
+          { origin_id: '1', duration: '120' },
+          { origin_id: '2', info: 'OUT_OF_SERVICE' },
+        ],
+      }),
+    })
+
+    await expect(client.times(center, [place(1).location, place(2).location, place(3).location], 'walking'))
+      .resolves.toEqual([2, undefined, 1])
+  })
+
+  it('skips the HTTP call for an empty destination list', async () => {
+    const http = vi.fn()
+    const client = createAmapDistanceClient({ key: 'server-only', http })
+
+    await expect(client.times(center, [], 'driving')).resolves.toEqual([])
+    expect(http).not.toHaveBeenCalled()
+  })
+
+  it('rejects with a safe error when the API rejects the whole call', async () => {
+    const client = createAmapDistanceClient({
+      key: 'server-only',
+      http: vi.fn().mockResolvedValue({ status: '0', info: 'INVALID_USER_KEY', infocode: '10001' }),
+    })
+
+    await expect(client.times(center, [place(1).location], 'driving')).rejects.toMatchObject({
+      name: 'SafeError', code: 'AMAP_UNAVAILABLE', message: 'Place travel times are temporarily unavailable',
+    })
+    await expect(client.times(center, [place(1).location], 'driving')).rejects.not.toThrow('INVALID_USER_KEY')
+  })
+
+  it('rejects when every origin lacks a usable duration', async () => {
+    const client = createAmapDistanceClient({
+      key: 'server-only',
+      http: vi.fn().mockResolvedValue({ status: '1', results: [{ origin_id: '1', info: 'OUT_OF_SERVICE' }] }),
+    })
+
+    await expect(client.times(center, [place(1).location], 'walking')).rejects.toMatchObject({
+      code: 'AMAP_UNAVAILABLE',
+    })
+  })
+
+  it('wraps transport failures without leaking the request URL or key', async () => {
+    const fetcher = vi.fn()
+      .mockRejectedValue(new Error('request failed for https://restapi.amap.com/v3/distance?key=secret'))
+    const client = createAmapDistanceClient({ key: 'server-only', http: createAmapDistanceHttp(fetcher as never) })
+
+    await expect(client.times(center, [place(1).location], 'driving')).rejects.toMatchObject({
+      code: 'AMAP_UNAVAILABLE',
+    })
+    await expect(client.times(center, [place(1).location], 'driving')).rejects.not.toThrow('secret')
+  })
+
+  it('requires the Amap key at construction time', () => {
+    vi.stubEnv('AMAP_WEB_KEY', '')
+    try {
+      expect(() => createAmapDistanceClient()).toThrow(
+        expect.objectContaining({ name: 'SafeError', code: 'AMAP_NOT_CONFIGURED' }),
+      )
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+})
+
 describe('recommendation place search adapter', () => {
   it('supports coordinate-only nearby search without sending an invalid empty region restriction', async () => {
     const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ status: '1', pois: [] }) })
@@ -321,6 +514,21 @@ describe('recommendation place search adapter', () => {
     const params = new URL(fetcher.mock.calls[0][0] as string).searchParams
     expect(params.has('keywords')).toBe(false)
     expect(params.get('types')).toBe('050000')
+  })
+
+  it('sends the v5 page_num parameter only for pages after the first', async () => {
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ status: '1', pois: [] }) })
+    const client = createAmapClient({ key: 'server-only', http: createAmapHttp(fetcher as never) })
+    const baseQuery = { keywords: '火锅', center, city: '', radiusMeters: 5_000 }
+
+    await client.search(baseQuery)
+    await client.search({ ...baseQuery, page: 1 })
+    await client.search({ ...baseQuery, page: 3 })
+
+    const keys = fetcher.mock.calls.map(call => new URL(call[0] as string).searchParams)
+    expect(keys[0].has('page_num')).toBe(false)
+    expect(keys[1].has('page_num')).toBe(false)
+    expect(keys[2].get('page_num')).toBe('3')
   })
 
   it('ships coordinate-only search and twenty-five candidates in the deployable place-search build', async () => {
@@ -370,6 +578,9 @@ describe('recommendation page contract', () => {
     expect(script).toContain('FIXED_RESTAURANT_CATEGORIES')
     expect(page).toContain('disabled="{{status === \'loading\'}}"')
     expect(cloud).toContain("name: 'recommend'")
+    expect(page).toContain('bindtap="onRetryLoadMore"')
+    expect(page).toContain('没有更多了')
+    expect(script).toContain('onReachBottom')
   })
 
   it('keeps expressions legal for WXML and keeps the Amap key out of the mini-program package', () => {
@@ -480,5 +691,32 @@ describe('recommendation page controller', () => {
     await first
     await submitter.run(callCloud)
     expect(callCloud).toHaveBeenCalledTimes(2)
+  })
+
+  it('returns the resolved center with a successful recommendation for later pages', async () => {
+    const recommend = vi.fn().mockResolvedValue(result)
+    const controller = createRecommendationController({ recommendPlaces: recommend })
+
+    await expect(controller.locateAndRecommend(controller.beginIntent(), input, async () => center))
+      .resolves.toMatchObject({ status: 'success', center })
+  })
+
+  it('appends the next page without duplicates and continues rank numbering', () => {
+    const rankedItem = (index: number): RecommendationItem => ({
+      place: place(index),
+      distanceMeters: 300,
+      travelMinutes: 8,
+      travelTimeUnavailable: false,
+      score: 80,
+      reasons: ['距离近'],
+    })
+    const ctx = { maxMinutes: 30, radiusMeters: 5_000, travelMode: 'walking' as const }
+    const existing = [rankedItem(1), rankedItem(2)].map((item, index) => toDisplayItem(item, index, ctx))
+
+    const added = appendDisplayItems(existing, [rankedItem(2), rankedItem(3)], ctx)
+
+    expect(added.map(item => item.place.poiId)).toEqual(['p03'])
+    expect(added[0].rankIndex).toBe(2)
+    expect(added[0].proximityLabel).toBe('路程 8 分钟')
   })
 })

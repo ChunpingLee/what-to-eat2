@@ -44,7 +44,7 @@ docs/                   设计规格、发布验收清单、隐私数据台账
 | --- | --- | --- | --- |
 | `favorites` | 当前用户收藏的读取、批量新增（去重）和删除 | — | 10 秒 |
 | `place-search` | 高德关键字/周边搜索适配，写 `place_search_cache` 与公共 `places` | `AMAP_WEB_KEY` | 15 秒 |
-| `place-routes` | 批量路线时间计算，基于事务的 QPS 限流 | `AMAP_WEB_KEY`、`AMAP_ROUTE_QPS` | 15 秒 |
+| `place-routes` | 批量路线时间计算（骑行逐条）与步行/驾车距离测量批量接口 | `AMAP_WEB_KEY`、`AMAP_ROUTE_QPS` | 15 秒 |
 | `link-import` | 分享链接域名白名单校验、安全解析、POI 匹配 | `AMAP_WEB_KEY` | 15 秒 |
 | `recommend` | 候选生成、缺失字段归一化打分、推荐理由生成 | `AMAP_WEB_KEY`、`AMAP_ROUTE_QPS` | 20 秒 |
 | `share-place` | 按 `poiId` 从公共 `places` 读取分享详情（仅公开字段） | — | 10 秒 |
@@ -87,7 +87,7 @@ docs/                   设计规格、发布验收清单、隐私数据台账
 
 4. 为 `place-search`、`place-routes`、`link-import`、`recommend` 配置环境变量（云开发控制台 → 云函数 → 配置）：
    - `AMAP_WEB_KEY`：高德 Web 服务 Key，只放云端，不写入源码
-   - `AMAP_ROUTE_QPS`：路线 API 限流值（`place-routes`、`recommend`），不高于 Key 实际配额，示例 `3`
+   - `AMAP_ROUTE_QPS`：骑行逐条路线 API 限流值（`place-routes`、`recommend`；步行/驾车走距离测量批量接口，不受此限流影响），不高于 Key 实际配额，示例 `3`
 
 ### 部署数据库规则
 

@@ -15,6 +15,7 @@ import {
   type CloudBaseCacheDatabase,
   type PlaceSearchResult,
 } from '../place-search/cache'
+import { createAmapDistanceClient, type DistanceTimesClient } from '../place-routes/amap-distance'
 import { createAmapRoutesClient, type RouteTimesClient } from '../place-routes/amap-routes'
 import {
   createCloudBaseRouteRateLimiter,
@@ -39,6 +40,8 @@ export interface RecommendationResult {
   items: RecommendationItem[]
   stale: boolean
   sourceUpdatedAt: string
+  /** 搜索源满页（25 条）时可能还有下一页，客户端据此继续上滑加载。 */
+  hasMore: boolean
 }
 
 export class RecommendationRequestError extends Error {
@@ -68,6 +71,13 @@ function validBudget(budget: RecommendationRequest['budget']): boolean {
   return min === undefined || max === undefined || min <= max
 }
 
+/** 每次推荐最多翻 10 页（约 100 家候选），保护搜索/路线 API 配额。 */
+const MAX_REQUEST_PAGE = 10
+
+function validPage(page: RecommendationRequest['page']): boolean {
+  return page === undefined || (Number.isInteger(page) && page >= 1 && page <= MAX_REQUEST_PAGE)
+}
+
 function validate(request: RecommendationRequest): void {
   if (!request || typeof request !== 'object') throw new RecommendationRequestError()
   const hasPreference = Boolean(text(request.category) || text(request.keywords) || request.random)
@@ -75,7 +85,8 @@ function validate(request: RecommendationRequest): void {
     || !finite(request.radiusMeters) || request.radiusMeters <= 0 || request.radiusMeters > 50_000
     || !['walking', 'bicycling', 'driving'].includes(request.travelMode)
     || request.maxMinutes !== undefined && (!finite(request.maxMinutes) || request.maxMinutes <= 0)
-    || !validBudget(request.budget)) {
+    || !validBudget(request.budget)
+    || !validPage(request.page)) {
     throw new RecommendationRequestError()
   }
 }
@@ -108,6 +119,12 @@ function matchesBudget(place: Place, budget: RecommendationRequest['budget']): b
 
 /** 高德 POI 分类：050000 餐饮服务大类。 */
 const RESTAURANT_TYPECODE = '050000'
+/** 与 place-search/amap-client 的 pageSize 一致；满页视为可能还有下一页。 */
+const SEARCH_PAGE_SIZE = 25
+/** 每页返回的推荐条数；客户端上滑一次加载一页。 */
+const RESULT_PAGE_SIZE = 10
+/** maxMinutes 过滤的候选窗口大小；窗口比返回页多 10 个作为过滤缓冲。 */
+const ROUTE_CANDIDATE_WINDOW = 20
 
 function searchFilter(request: RecommendationRequest): { keywords: string; types?: string } {
   // 不限/随便吃：keywords 是对门店名的模糊匹配而非分类过滤，会混入非餐厅 POI；
@@ -141,16 +158,16 @@ interface DisplayTravelTimes {
   drivingMinutes?: number
 }
 
-/** 展示用的分模式时间：单个模式整体失败只丢该模式的展示，不影响结果本身。 */
-async function collectDisplayTimes(
-  routeClient: RouteTimesClient,
+/** 并行预取窗口内步行/驾车展示时间：单个模式整体失败只丢该模式的展示，不影响结果本身。 */
+async function fetchChipTimes(
+  client: DistanceTimesClient,
   center: GeoPoint,
   destinations: GeoPoint[],
-  modes: Array<'walking' | 'driving'>,
+  modes: ReadonlyArray<'walking' | 'driving'>,
 ): Promise<Partial<Record<'walking' | 'driving', Array<number | undefined>>>> {
   const entries = await Promise.all(modes.map(async mode => {
     try {
-      return [mode, await routeClient.times(center, destinations, mode)] as const
+      return [mode, await client.times(center, destinations, mode)] as const
     } catch {
       return undefined
     }
@@ -165,78 +182,86 @@ async function collectDisplayTimes(
 export function createRecommendHandler(deps: {
   searchClient: RecommendationSearchClient
   routeClient: RouteTimesClient
+  distanceClient: DistanceTimesClient
 }) {
   return async (request: RecommendationRequest): Promise<RecommendationResult> => {
     validate(request)
-    const searchResult = await deps.searchClient.search({
-      ...searchFilter(request),
-      center: request.center,
-      city: '',
-      radiusMeters: request.radiusMeters,
-    })
-    const candidates = searchResult.items
+    // 翻页请求累积读取第 1..N 页（前页通常命中缓存）：按合并后的候选全局排序，
+    // 第 N 页取 [(N-1)*10, (N-1)*10+20)，避免跳过前页候选池中的第 11-20 名。
+    const pageIndex = request.page ?? 1
+    const searchResults = await Promise.all(Array.from({ length: pageIndex }, (_, index) =>
+      deps.searchClient.search({
+        ...searchFilter(request),
+        center: request.center,
+        city: '',
+        radiusMeters: request.radiusMeters,
+        ...(index > 0 ? { page: index + 1 } : {}),
+      })))
+    const latest = searchResults[searchResults.length - 1]
+    const seenPoiIds = new Set<string>()
+    const searched = searchResults.flatMap(result => result.items.filter(place => {
+      if (seenPoiIds.has(place.poiId)) return false
+      seenPoiIds.add(place.poiId)
+      return true
+    }))
+    const candidates = searched
       .map(place => ({ place, distanceMeters: distanceMeters(request.center, place.location) }))
       .filter(candidate => candidate.distanceMeters <= request.radiusMeters
         && matchesPreference(candidate.place, request)
         && matchesBudget(candidate.place, request.budget))
 
-    const preRanked = rankRecommendations(candidates, request).slice(0, 20)
+    const offset = (pageIndex - 1) * RESULT_PAGE_SIZE
+    // 无 maxMinutes 时 travelMinutes 不参与打分与过滤，窗口收敛到返回页大小即可。
+    const routeWindowSize = request.maxMinutes === undefined ? RESULT_PAGE_SIZE : ROUTE_CANDIDATE_WINDOW
+    const preRanked = rankRecommendations(candidates, request).slice(offset, offset + routeWindowSize)
     const routeCandidates: RecommendationCandidate[] = preRanked.map(item => ({
       place: item.place,
       distanceMeters: item.distanceMeters,
     }))
-    let routed = routeCandidates
-    let selectedTimes: Array<number | undefined> | undefined
-    if (routeCandidates.length > 0) {
-      try {
-        selectedTimes = await deps.routeClient.times(
-          request.center,
-          routeCandidates.map(candidate => candidate.place.location),
-          request.travelMode,
-        )
-        routed = withRouteTimes(routeCandidates, selectedTimes, request.maxMinutes)
-      } catch {
-        // 路线服务整体不可用：按距离回落，不再为展示补算（避免对故障中的服务加倍请求）。
-        routed = routeCandidates
+    const routeLocations = routeCandidates.map(candidate => candidate.place.location)
+
+    // 步行/驾车时间统一走距离测量批量接口：一次调用覆盖整个候选窗口（餐厅为 origins、用户为
+    // destination 的方向反转），选定方式的结果直接复用为 chips，另一方式并行预取，共 2 次并行
+    // HTTP。仅骑行仍走逐条路径规划（v4 无批量形态，受 AMAP_ROUTE_QPS 限流），与批量预取并行。
+    const chipModes = request.travelMode === 'bicycling'
+      ? (['walking', 'driving'] as const)
+      : (['walking', 'driving'] as const).filter(mode => mode !== request.travelMode)
+    const selectedCall = routeCandidates.length === 0 ? undefined
+      : request.travelMode === 'bicycling'
+        ? deps.routeClient.times(request.center, routeLocations, request.travelMode).catch(() => undefined)
+        : deps.distanceClient.times(request.center, routeLocations, request.travelMode).catch(() => undefined)
+    const chipCall = routeCandidates.length === 0
+      ? Promise.resolve({} as Partial<Record<'walking' | 'driving', Array<number | undefined>>>)
+      : fetchChipTimes(deps.distanceClient, request.center, routeLocations, chipModes)
+    const selectedTimes = await selectedCall
+    const routed = selectedTimes === undefined ? routeCandidates : withRouteTimes(routeCandidates, selectedTimes, request.maxMinutes)
+
+    const top = rankRecommendations(routed, request).slice(0, RESULT_PAGE_SIZE)
+    const chipTimes = await chipCall
+    const windowIndexByPoiId = new Map(routeCandidates.map((candidate, index) => [candidate.place.poiId, index]))
+    const chipMinutes = (item: RankedPlace, mode: 'walking' | 'driving') => {
+      if (request.travelMode === mode) return item.travelMinutes
+      const index = windowIndexByPoiId.get(item.place.poiId)
+      return index === undefined ? undefined : chipTimes[mode]?.[index]
+    }
+    const items: RecommendationItem[] = top.map(item => {
+      const walkingMinutes = chipMinutes(item, 'walking')
+      const drivingMinutes = chipMinutes(item, 'driving')
+      const displayTimes: DisplayTravelTimes = {
+        ...(walkingMinutes === undefined ? {} : { walkingMinutes }),
+        ...(drivingMinutes === undefined ? {} : { drivingMinutes }),
       }
-    }
-
-    const top = rankRecommendations(routed, request).slice(0, 10)
-    // 步行/驾车展示时间：选定方式已算过的直接复用，其余只为最终 10 家补算，控制路线 API 调用量。
-    const selectedIsChipMode = selectedTimes !== undefined
-      && (request.travelMode === 'walking' || request.travelMode === 'driving')
-    const displayTimes: DisplayTravelTimes[] = top.map(item =>
-      selectedIsChipMode && item.travelMinutes !== undefined
-        ? request.travelMode === 'walking'
-          ? { walkingMinutes: item.travelMinutes }
-          : { drivingMinutes: item.travelMinutes }
-        : {})
-    const missingModes = selectedTimes === undefined ? []
-      : (['walking', 'driving'] as const).filter(mode => !(selectedIsChipMode && request.travelMode === mode))
-    if (missingModes.length > 0 && top.length > 0) {
-      const times = await collectDisplayTimes(
-        deps.routeClient,
-        request.center,
-        top.map(item => item.place.location),
-        missingModes,
-      )
-      top.forEach((_item, index) => {
-        const walkingMinutes = times.walking?.[index]
-        const drivingMinutes = times.driving?.[index]
-        if (walkingMinutes !== undefined) displayTimes[index] = { ...displayTimes[index], walkingMinutes }
-        if (drivingMinutes !== undefined) displayTimes[index] = { ...displayTimes[index], drivingMinutes }
-      })
-    }
-
-    const items: RecommendationItem[] = top.map((item, index) => ({
-      ...item,
-      travelTimeUnavailable: item.travelMinutes === undefined,
-      ...displayTimes[index],
-    }))
+      return {
+        ...item,
+        travelTimeUnavailable: item.travelMinutes === undefined,
+        ...displayTimes,
+      }
+    })
     return {
       items,
-      stale: searchResult.stale,
-      sourceUpdatedAt: searchResult.sourceUpdatedAt,
+      stale: latest.stale,
+      sourceUpdatedAt: latest.sourceUpdatedAt,
+      hasMore: latest.items.length >= SEARCH_PAGE_SIZE,
     }
   }
 }
@@ -274,8 +299,10 @@ export function main(
   })
   return createRecommendHandler({
     searchClient: { search: query => searchService.searchPlaces(query) },
+    // 骑行仍走逐条路径规划（含限流）；步行/驾车由 distanceClient 批量计算。
     routeClient: createLazyRouteTimesClient(() => createAmapRoutesClient({
       limiter: createCloudBaseRouteRateLimiter(database),
     })),
+    distanceClient: createAmapDistanceClient(),
   })(event)
 }
