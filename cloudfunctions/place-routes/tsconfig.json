@@ -12,6 +12,7 @@
   },
   "include": [
     "index.ts",
+    "amap-distance.ts",
     "amap-routes.ts",
     "rate-limiter.ts",
     "../shared/cloudbase-sdk.ts",

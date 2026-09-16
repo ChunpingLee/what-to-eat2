@@ -91,6 +91,9 @@ function createAmapHttp(fetcher = (0, https_json_1.createHttpsJsonFetch)(), diag
             }
             if (query.pageSize !== undefined)
                 params.set('page_size', String(query.pageSize));
+            // 注意：v5 接口翻页参数是 page_num（v3 的 page 会被忽略，导致每次都返回第 1 页）。
+            if (query.page !== undefined && query.page > 1)
+                params.set('page_num', String(query.page));
             const response = await fetcher(`https://restapi.amap.com/v5/place/around?${params}`, { signal: controller.signal });
             if (!response.ok)
                 throw new errors_1.SafeError('AMAP_UNAVAILABLE', 'Place search is temporarily unavailable');
@@ -133,6 +136,7 @@ function createAmapClient({ key = process.env.AMAP_WEB_KEY, http = createAmapHtt
                 showFields: 'business,photos',
                 pageSize: 25,
                 ...(query.types?.trim() ? { types: query.types.trim() } : {}),
+                ...(query.page !== undefined && query.page > 1 ? { page: query.page } : {}),
             });
             if (response.status !== '1' || !Array.isArray(response.pois)) {
                 diagnostic({

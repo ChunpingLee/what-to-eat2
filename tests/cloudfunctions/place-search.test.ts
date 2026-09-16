@@ -396,6 +396,22 @@ describe('place search cloud function', () => {
     expect(client.search).toHaveBeenCalledTimes(2)
   })
 
+  it('caches paged searches apart from the first page and forwards the page to Amap', async () => {
+    const base = { ...query, keywords: '火锅', city: '' }
+
+    // page 1/缺省共用旧 key，既有缓存条目继续命中；第 2 页起单独缓存。
+    expect(cacheKeyFor({ ...base, page: 1 })).toBe(cacheKeyFor(base))
+    expect(cacheKeyFor({ ...base, page: 2 })).not.toBe(cacheKeyFor(base))
+
+    const client = { search: vi.fn().mockResolvedValue([]) }
+    const service = createPlaceSearchService({ client, cache: createMemorySearchCache() })
+    await service.searchPlaces(base)
+    await service.searchPlaces({ ...base, page: 2 })
+
+    expect(client.search).toHaveBeenCalledTimes(2)
+    expect(client.search).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }))
+  })
+
   it('returns an expired cache entry as stale only after an Amap timeout and within 24 hours', async () => {
     const cache = createMemorySearchCache()
     const cachedAt = 1_000_000 - 31 * 60 * 1_000

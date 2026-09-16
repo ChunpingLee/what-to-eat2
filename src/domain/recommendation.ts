@@ -12,6 +12,8 @@ export interface RecommendationRequest {
   travelMode: TravelMode
   maxMinutes?: number
   budget?: { min?: number; max?: number }
+  /** 传输层分页：高德周边搜索页码（1 基）。打分逻辑不使用。 */
+  page?: number
 }
 
 export interface RecommendationCandidate {

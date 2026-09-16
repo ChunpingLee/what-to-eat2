@@ -12,6 +12,7 @@
   },
   "include": [
     "index.ts",
+    "../place-routes/amap-distance.ts",
     "../place-routes/amap-routes.ts",
     "../place-routes/rate-limiter.ts",
     "../place-search/amap-client.ts",

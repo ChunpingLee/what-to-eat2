@@ -156,4 +156,14 @@
       </view>
     </view>
   </block>
+
+  <view wx:if="{{status === 'ready' && items.length > 0}}" class="load-more">
+    <view wx:if="{{loadingMore}}" class="load-more-loading">
+      <view class="loading-dot"></view>
+      <text>正在加载更多…</text>
+    </view>
+    <view wx:elif="{{loadMoreError}}" class="load-more-error" bindtap="onRetryLoadMore">{{loadMoreError}}</view>
+    <view wx:elif="{{hasMore}}" class="load-more-hint">上滑加载更多</view>
+    <view wx:else class="load-more-done">没有更多了</view>
+  </view>
 </view>
